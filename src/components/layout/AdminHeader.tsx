@@ -1,34 +1,71 @@
 "use client";
 
-import { Bell, Search, UserCircle2 } from "lucide-react";
+import { useEffect, useState } from "react";
+import Image from "next/image";
+import { UserCircle2 } from "lucide-react";
+import { createClient } from "@/lib/supabase/client";
+
+type AdminData = {
+  full_name: string | null;
+  designation: string | null;
+  profile_photo_url: string | null;
+};
 
 export default function AdminHeader() {
+  const supabase = createClient();
+
+  const [admin, setAdmin] = useState<AdminData | null>(null);
+
+  useEffect(() => {
+    const getAdmin = async () => {
+      const {
+        data: { user },
+      } = await supabase.auth.getUser();
+
+      if (!user) return;
+console.log("Logged in Email:", user.email);
+      const { data, error } = await supabase
+        .from("employees")
+        .select("full_name, designation, profile_photo_url")
+        .eq("email", user.email)
+        .single();
+
+      if (error) {
+        console.error("Admin Error:", error);
+        return;
+      }
+
+      setAdmin(data);
+    };
+
+    getAdmin();
+  }, []);
+
   return (
-    <header className="flex h-16 items-center justify-between rounded-xl bg-white px-6 shadow-sm">
-      <div className="relative w-full max-w-md">
-        <Search
-          size={18}
-          className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400"
-        />
+    <header className="flex h-16 items-center justify-end rounded-xl bg-white px-6 shadow-sm">
+      <div className="flex items-center gap-3">
+        {admin?.profile_photo_url ? (
+          <Image
+            src={admin.profile_photo_url}
+            alt={admin.full_name ?? "Admin"}
+            width={42}
+            height={42}
+            className="rounded-full object-cover border border-gray-300"
+          />
+        ) : (
+          <UserCircle2 size={40} className="text-violet-700" />
+        )}
 
-        <input
-          type="text"
-          placeholder="Search employees..."
-          className="w-full rounded-lg border border-gray-300 py-2 pl-10 pr-4 outline-none focus:border-violet-500"
-        />
-      </div>
+        <div className="text-right">
+          <p className="text-lg font-semibold text-gray-900">
+            {admin?.full_name || "Admin"}
+          </p>
 
-     
-
-        <div className="flex items-center gap-3">
-          <UserCircle2 size={34} className="text-violet-700" />
-
-          <div>
-            <p className="font-semibold">Ashwini</p>
-            <p className="text-sm text-gray-500">HR/Accounts</p>
-          </div>
+          <p className="text-sm text-gray-500">
+            {admin?.designation || "Administrator"}
+          </p>
         </div>
-      
+      </div>
     </header>
   );
 }

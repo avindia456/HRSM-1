@@ -20,11 +20,7 @@ const menu = [
     href: "/employee/dashboard",
     icon: LayoutDashboard,
   },
-  {
-    name: "Attendance",
-    href: "/employee/attendance",
-    icon: Clock3,
-  },
+  
   {
     name: "Work From Home",
     href: "/employee/work-from-home",

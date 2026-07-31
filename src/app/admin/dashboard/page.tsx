@@ -1,13 +1,12 @@
 import { createClient } from "@/lib/supabase/server";
 import StatsCard from "@/components/dashboard/StatsCard";
+import AdminAttendance from "@/components/Admin/AdminAttendance";
 import {
   Users,
   Clock3,
   House,
   CalendarDays,
-} from "lucide-react";
-
-
+ } from "lucide-react";
 export default async function AdminDashboard() {
   const supabase = await createClient();
 
@@ -15,9 +14,13 @@ export default async function AdminDashboard() {
     .from("employees")
     .select("*", { count: "exact", head: true });
 
-  const { count: presentToday } = await supabase
-    .from("attendance")
-    .select("*", { count: "exact", head: true });
+  const today = new Date().toISOString().split("T")[0];
+
+const { count: presentToday } = await supabase
+  .from("attendance")
+  .select("*", { count: "exact", head: true })
+  .eq("attendance_date", today)
+  .in("status", ["Working", "Present", "Half Day"]);
 
   const { count: leaveRequests } = await supabase
     .from("leaves")
@@ -25,6 +28,7 @@ export default async function AdminDashboard() {
 const { count: wfhToday } = await supabase
   .from("attendance")
   .select("*", { count: "exact", head: true })
+  .eq("attendance_date", today)
   .eq("status", "WFH");
   const { data: employees } = await supabase
     .from("employees")
@@ -65,7 +69,7 @@ return (
         color="bg-red-500"
       />
     </div>
-
+<AdminAttendance />
     <div className="mt-10 rounded-xl bg-white p-6 shadow">
       <h2 className="mb-5 text-2xl font-semibold">
         Recent Employees

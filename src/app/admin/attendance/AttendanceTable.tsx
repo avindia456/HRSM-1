@@ -25,36 +25,38 @@ export default function AttendanceTable() {
   const [loading, setLoading] = useState(true);
 
   const [records, setRecords] = useState<AttendanceRecord[]>([]);
-  const [employees, setEmployees] = useState<
-    Record<string, Employee>
-  >({});
+  const [employees, setEmployees] = useState<Record<string, Employee>>({});
 
   const [search, setSearch] = useState("");
   const [selectedDate, setSelectedDate] = useState("");
-function calculateWorkingHours(
-  checkIn: string | null,
-  checkOut: string | null
-) {
-  if (!checkIn || !checkOut) return "--";
 
-  const [inH, inM, inS] = checkIn.split(":").map(Number);
-  const [outH, outM, outS] = checkOut.split(":").map(Number);
+  function calculateWorkingHours(
+    checkIn: string | null,
+    checkOut: string | null
+  ) {
+    if (!checkIn || !checkOut) return "--";
 
-  const inTime = new Date();
-  inTime.setHours(inH, inM, inS);
+    const [inH, inM, inS] = checkIn.split(":").map(Number);
+    const [outH, outM, outS] = checkOut.split(":").map(Number);
 
-  const outTime = new Date();
-  outTime.setHours(outH, outM, outS);
+    const inTime = new Date();
+    inTime.setHours(inH, inM, inS);
 
-  const diff = outTime.getTime() - inTime.getTime();
+    const outTime = new Date();
+    outTime.setHours(outH, outM, outS);
 
-  if (diff <= 0) return "--";
+    const diff = outTime.getTime() - inTime.getTime();
 
-  const hours = Math.floor(diff / (1000 * 60 * 60));
-  const minutes = Math.floor((diff % (1000 * 60 * 60)) / (1000 * 60));
+    if (diff <= 0) return "--";
 
-  return `${hours}h ${minutes}m`;
-}
+    const hours = Math.floor(diff / (1000 * 60 * 60));
+    const minutes = Math.floor(
+      (diff % (1000 * 60 * 60)) / (1000 * 60)
+    );
+
+    return `${hours}h ${minutes}m`;
+  }
+
   useEffect(() => {
     loadData();
   }, []);
@@ -68,9 +70,10 @@ function calculateWorkingHours(
       .select("id, full_name, email");
 
     const employeeMap: Record<string, Employee> = {};
-employeeData?.forEach((emp: Employee) => {
-  employeeMap[emp.id] = emp;
-});
+
+    employeeData?.forEach((emp: Employee) => {
+      employeeMap[emp.id] = emp;
+    });
 
     setEmployees(employeeMap);
 
@@ -108,19 +111,26 @@ employeeData?.forEach((emp: Employee) => {
     });
   }, [records, employees, search, selectedDate]);
 
-  const presentCount = filteredRecords.filter(
+  // Summary cards ke liye sirf aaj ka attendance
+  const today = new Date().toISOString().split("T")[0];
+
+  const todayRecords = records.filter(
+    (record) => record.attendance_date === today
+  );
+
+  const presentCount = todayRecords.filter(
     (r) => r.status === "Present"
   ).length;
 
-  const workingCount = filteredRecords.filter(
+  const workingCount = todayRecords.filter(
     (r) => r.status === "Working"
   ).length;
 
-  const lateCount = filteredRecords.filter(
+  const lateCount = todayRecords.filter(
     (r) => r.late_mark
   ).length;
 
-  const totalCount = filteredRecords.length;
+  const totalCount = todayRecords.length;
 
   if (loading) {
     return (
