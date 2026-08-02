@@ -46,7 +46,7 @@ const menu = [
   },
   {
   name: "Sales Performance",
-  href: "/employee/sales-performance",
+  href: "/admin/sales-performance",
   icon: TrendingUp,
 }
 ];
