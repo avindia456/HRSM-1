@@ -771,11 +771,11 @@ status: "Pending",
                         </td>
 
                         <td className="p-4">
-                          calculateDays(
-leave.start_date,
-leave.end_date
-)
-                        </td>
+  {calculateDays(
+    leave.start_date,
+    leave.end_date
+  )}
+</td>
 
                         <td className="p-4 max-w-xs">
                           {leave.reason ||
