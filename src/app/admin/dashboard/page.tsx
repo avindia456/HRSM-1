@@ -45,28 +45,28 @@ return (
         title="Employees"
         value={totalEmployees ?? 0}
         icon={Users}
-        color="bg-blue-500"
+        color="blue"
       />
 
       <StatsCard
         title="Present Today"
         value={presentToday ?? 0}
         icon={Clock3}
-        color="bg-green-500"
+        color="green"
       />
 
       <StatsCard
         title="WFH Today"
         value={wfhToday ?? 0}
         icon={House}
-        color="bg-orange-500"
+        color="orange"
       />
 
       <StatsCard
         title="Leave Requests"
         value={leaveRequests ?? 0}
         icon={CalendarDays}
-        color="bg-red-500"
+        color="red"
       />
     </div>
 <AdminAttendance />

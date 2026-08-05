@@ -16,14 +16,21 @@ interface Employee {
 interface SalesPerformance {
   id: string;
   employee_id: string;
+
+  performance_date: string | null;
+
   month: number;
+  week_number: number;
   year: number;
+
   target: number;
   completed: number;
-  pending_target: number;
+
   remaining_time: string | null;
+
   file_name: string | null;
   file_path: string | null;
+
   created_at: string;
   updated_at: string;
 }
@@ -58,29 +65,60 @@ export default function AdminSalesPerformancePage() {
 
   const [yearFilter, setYearFilter] = useState("All");
 
+  const [weekFilter, setWeekFilter] = useState("All");
+
   const [selectedRecord, setSelectedRecord] =
     useState<PerformanceRow | null>(null);
 
   const [showModal, setShowModal] = useState(false);
 
+  /*
+   * ---------------------------------------------------------
+   * LOAD
+   * ---------------------------------------------------------
+   */
+
   useEffect(() => {
-    loadPerformance();
+    void loadPerformance();
   }, []);
 
   async function loadPerformance() {
     setLoading(true);
 
     try {
+      /*
+       * Load weekly sales records
+       */
+
       const {
         data: performanceData,
         error: performanceError,
       } = await supabase
         .from("sales_performance")
-        .select("*")
+        .select(
+          `
+            id,
+            employee_id,
+            performance_date,
+            month,
+            week_number,
+            year,
+            target,
+            completed,
+            remaining_time,
+            file_name,
+            file_path,
+            created_at,
+            updated_at
+          `
+        )
         .order("year", {
           ascending: false,
         })
         .order("month", {
+          ascending: false,
+        })
+        .order("week_number", {
           ascending: false,
         });
 
@@ -90,18 +128,25 @@ export default function AdminSalesPerformancePage() {
           performanceError
         );
 
-        setLoading(false);
+        alert(
+          `Unable to load sales performance: ${performanceError.message}`
+        );
+
+        setRecords([]);
         return;
       }
 
       const performances =
-        (performanceData || []) as SalesPerformance[];
+        (performanceData ?? []) as SalesPerformance[];
 
       if (performances.length === 0) {
         setRecords([]);
-        setLoading(false);
         return;
       }
+
+      /*
+       * Get unique employee ids
+       */
 
       const employeeIds = [
         ...new Set(
@@ -113,6 +158,10 @@ export default function AdminSalesPerformancePage() {
 
       let employees: Employee[] = [];
 
+      /*
+       * Load employees
+       */
+
       if (employeeIds.length > 0) {
         const {
           data: employeeData,
@@ -120,7 +169,13 @@ export default function AdminSalesPerformancePage() {
         } = await supabase
           .from("employees")
           .select(
-            "id, full_name, email, department, designation"
+            `
+              id,
+              full_name,
+              email,
+              department,
+              designation
+            `
           )
           .in("id", employeeIds);
 
@@ -130,19 +185,35 @@ export default function AdminSalesPerformancePage() {
             employeeError
           );
         } else {
-          employees = (employeeData || []) as Employee[];
+          employees =
+            (employeeData ?? []) as Employee[];
         }
       }
+
+      /*
+       * Create employee lookup map
+       */
+
+      const employeeMap = new Map<
+        string,
+        Employee
+      >();
+
+      employees.forEach((employee) => {
+        employeeMap.set(employee.id, employee);
+      });
+
+      /*
+       * Join employee with performance
+       */
 
       const rows: PerformanceRow[] =
         performances.map((record) => ({
           ...record,
 
           employee:
-            employees.find(
-              (employee) =>
-                employee.id === record.employee_id
-            ) || null,
+            employeeMap.get(record.employee_id) ??
+            null,
         }));
 
       setRecords(rows);
@@ -151,10 +222,18 @@ export default function AdminSalesPerformancePage() {
         "Admin Sales Performance Error:",
         error
       );
+
+      alert("Something went wrong while loading.");
     } finally {
       setLoading(false);
     }
   }
+
+  /*
+   * ---------------------------------------------------------
+   * VIEW FILE
+   * ---------------------------------------------------------
+   */
 
   async function viewFile(
     filePath: string | null
@@ -175,12 +254,15 @@ export default function AdminSalesPerformancePage() {
         error
       );
 
-      alert(error.message);
+      alert(
+        `Unable to open file: ${error.message}`
+      );
+
       return;
     }
 
     if (!data?.signedUrl) {
-      alert("Unable to open file.");
+      alert("Unable to generate file URL.");
       return;
     }
 
@@ -190,6 +272,12 @@ export default function AdminSalesPerformancePage() {
       "noopener,noreferrer"
     );
   }
+
+  /*
+   * ---------------------------------------------------------
+   * MODAL
+   * ---------------------------------------------------------
+   */
 
   function openDetails(
     record: PerformanceRow
@@ -203,13 +291,27 @@ export default function AdminSalesPerformancePage() {
     setSelectedRecord(null);
   }
 
+  /*
+   * ---------------------------------------------------------
+   * YEARS
+   * ---------------------------------------------------------
+   */
+
   const availableYears = useMemo(() => {
     return [
       ...new Set(
-        records.map((record) => record.year)
+        records.map((record) =>
+          Number(record.year)
+        )
       ),
     ].sort((a, b) => b - a);
   }, [records]);
+
+  /*
+   * ---------------------------------------------------------
+   * FILTERED RECORDS
+   * ---------------------------------------------------------
+   */
 
   const filteredRecords = useMemo(() => {
     const searchValue =
@@ -218,34 +320,63 @@ export default function AdminSalesPerformancePage() {
     return records.filter((record) => {
       const employeeName =
         record.employee?.full_name
-          ?.toLowerCase() || "";
+          ?.toLowerCase() ?? "";
 
       const employeeEmail =
         record.employee?.email
-          ?.toLowerCase() || "";
+          ?.toLowerCase() ?? "";
 
       const department =
         record.employee?.department
-          ?.toLowerCase() || "";
+          ?.toLowerCase() ?? "";
+
+      const designation =
+        record.employee?.designation
+          ?.toLowerCase() ?? "";
+
+      /*
+       * Search
+       */
 
       const matchesSearch =
         !searchValue ||
         employeeName.includes(searchValue) ||
         employeeEmail.includes(searchValue) ||
-        department.includes(searchValue);
+        department.includes(searchValue) ||
+        designation.includes(searchValue);
+
+      /*
+       * Month
+       */
 
       const matchesMonth =
         monthFilter === "All" ||
-        record.month === Number(monthFilter);
+        Number(record.month) ===
+          Number(monthFilter);
+
+      /*
+       * Year
+       */
 
       const matchesYear =
         yearFilter === "All" ||
-        record.year === Number(yearFilter);
+        Number(record.year) ===
+          Number(yearFilter);
+
+      /*
+       * Week
+       */
+
+      const matchesWeek =
+        weekFilter === "All" ||
+        Number(record.week_number) ===
+          Number(weekFilter);
 
       return (
         matchesSearch &&
         matchesMonth &&
-        matchesYear
+        matchesYear &&
+        matchesWeek
       );
     });
   }, [
@@ -253,22 +384,94 @@ export default function AdminSalesPerformancePage() {
     search,
     monthFilter,
     yearFilter,
+    weekFilter,
   ]);
 
-  const summary = useMemo(() => {
-    const totalTarget =
-      filteredRecords.reduce(
-        (sum, record) =>
-          sum + Number(record.target || 0),
-        0
-      );
+  /*
+   * ---------------------------------------------------------
+   * SUMMARY
+   * ---------------------------------------------------------
+   *
+   * IMPORTANT:
+   *
+   * Target is MONTHLY.
+   * Completed is WEEKLY.
+   *
+   * Example:
+   *
+   * August Target = 100000
+   *
+   * Week 1 = 10000
+   * Week 2 = 20000
+   * Week 3 = 15000
+   *
+   * Correct:
+   *
+   * Target = 100000
+   * Completed = 45000
+   * Pending = 55000
+   *
+   * NOT:
+   *
+   * Target = 300000
+   */
 
-    const totalCompleted =
-      filteredRecords.reduce(
-        (sum, record) =>
-          sum + Number(record.completed || 0),
-        0
-      );
+  const summary = useMemo(() => {
+    /*
+     * One monthly target per:
+     *
+     * employee + month + year
+     */
+
+    const monthlyTargetMap =
+      new Map<string, number>();
+
+    let totalCompleted = 0;
+
+    filteredRecords.forEach((record) => {
+      const employeeId =
+        record.employee_id;
+
+      const month =
+        Number(record.month);
+
+      const year =
+        Number(record.year);
+
+      const target =
+        Number(record.target) || 0;
+
+      const completed =
+        Number(record.completed) || 0;
+
+      const monthlyKey =
+        `${employeeId}-${year}-${month}`;
+
+      /*
+       * Add monthly target only once.
+       */
+
+      if (
+        !monthlyTargetMap.has(monthlyKey)
+      ) {
+        monthlyTargetMap.set(
+          monthlyKey,
+          target
+        );
+      }
+
+      /*
+       * Weekly completed gets added.
+       */
+
+      totalCompleted += completed;
+    });
+
+    let totalTarget = 0;
+
+    monthlyTargetMap.forEach((target) => {
+      totalTarget += target;
+    });
 
     const totalPending = Math.max(
       totalTarget - totalCompleted,
@@ -278,7 +481,8 @@ export default function AdminSalesPerformancePage() {
     const achievement =
       totalTarget > 0
         ? Math.round(
-            (totalCompleted / totalTarget) * 100
+            (totalCompleted / totalTarget) *
+              100
           )
         : 0;
 
@@ -290,10 +494,77 @@ export default function AdminSalesPerformancePage() {
     };
   }, [filteredRecords]);
 
+  /*
+   * ---------------------------------------------------------
+   * SELECTED MONTH STATS
+   * ---------------------------------------------------------
+   *
+   * Modal should show monthly total completed,
+   * not only the selected week's completed.
+   */
+
+  const selectedMonthlyStats = useMemo(() => {
+    if (!selectedRecord) {
+      return {
+        target: 0,
+        completed: 0,
+        pending: 0,
+        achievement: 0,
+      };
+    }
+
+    const sameMonthRecords =
+      records.filter(
+        (record) =>
+          record.employee_id ===
+            selectedRecord.employee_id &&
+          Number(record.month) ===
+            Number(selectedRecord.month) &&
+          Number(record.year) ===
+            Number(selectedRecord.year)
+      );
+
+    const target =
+      Number(selectedRecord.target) || 0;
+
+    const completed =
+      sameMonthRecords.reduce(
+        (sum, record) =>
+          sum +
+          (Number(record.completed) || 0),
+        0
+      );
+
+    const pending = Math.max(
+      target - completed,
+      0
+    );
+
+    const achievement =
+      target > 0
+        ? Math.round(
+            (completed / target) * 100
+          )
+        : 0;
+
+    return {
+      target,
+      completed,
+      pending,
+      achievement,
+    };
+  }, [selectedRecord, records]);
+
+  /*
+   * ---------------------------------------------------------
+   * LOADING
+   * ---------------------------------------------------------
+   */
+
   if (loading) {
     return (
       <div className="p-8">
-        <div className="bg-white rounded-xl shadow-lg p-8">
+        <div className="rounded-xl bg-white p-8 shadow-lg">
           <p className="text-lg font-semibold">
             Loading Sales Performance...
           </p>
@@ -302,10 +573,15 @@ export default function AdminSalesPerformancePage() {
     );
   }
 
+  /*
+   * ---------------------------------------------------------
+   * UI
+   * ---------------------------------------------------------
+   */
+
   return (
     <>
       <div className="space-y-8 p-8">
-
         {/* HEADER */}
 
         <div>
@@ -313,16 +589,15 @@ export default function AdminSalesPerformancePage() {
             Sales Performance
           </h1>
 
-          <p className="text-gray-500 mt-1">
-            View employee monthly sales performance
-            and uploaded reports.
+          <p className="mt-1 text-gray-500">
+            View employee weekly sales
+            performance and monthly progress.
           </p>
         </div>
 
         {/* SUMMARY */}
 
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-5">
-
+        <div className="grid grid-cols-1 gap-5 sm:grid-cols-2 lg:grid-cols-4">
           <SummaryCard
             title="Total Target"
             value={summary.totalTarget}
@@ -346,14 +621,13 @@ export default function AdminSalesPerformancePage() {
             value={`${summary.achievement}%`}
             color="text-blue-600"
           />
-
         </div>
 
         {/* FILTERS */}
 
-        <div className="bg-white rounded-xl shadow p-5">
-
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+        <div className="rounded-xl bg-white p-5 shadow">
+          <div className="grid grid-cols-1 gap-4 md:grid-cols-4">
+            {/* SEARCH */}
 
             <input
               type="text"
@@ -362,76 +636,103 @@ export default function AdminSalesPerformancePage() {
                 setSearch(e.target.value)
               }
               placeholder="Search employee..."
-              className="border rounded-lg p-3 w-full"
+              className="w-full rounded-lg border p-3"
             />
+
+            {/* MONTH */}
 
             <select
               value={monthFilter}
               onChange={(e) =>
                 setMonthFilter(e.target.value)
               }
-              className="border rounded-lg p-3 w-full"
+              className="w-full rounded-lg border p-3"
             >
               <option value="All">
                 All Months
               </option>
 
-              {MONTHS.map((month, index) => (
-                <option
-                  key={month}
-                  value={index + 1}
-                >
-                  {month}
-                </option>
-              ))}
+              {MONTHS.map(
+                (month, index) => (
+                  <option
+                    key={month}
+                    value={index + 1}
+                  >
+                    {month}
+                  </option>
+                )
+              )}
             </select>
+
+            {/* WEEK */}
+
+            <select
+              value={weekFilter}
+              onChange={(e) =>
+                setWeekFilter(e.target.value)
+              }
+              className="w-full rounded-lg border p-3"
+            >
+              <option value="All">
+                All Weeks
+              </option>
+
+              {[1, 2, 3, 4, 5].map(
+                (week) => (
+                  <option
+                    key={week}
+                    value={week}
+                  >
+                    Week {week}
+                  </option>
+                )
+              )}
+            </select>
+
+            {/* YEAR */}
 
             <select
               value={yearFilter}
               onChange={(e) =>
                 setYearFilter(e.target.value)
               }
-              className="border rounded-lg p-3 w-full"
+              className="w-full rounded-lg border p-3"
             >
               <option value="All">
                 All Years
               </option>
 
-              {availableYears.map((year) => (
-                <option
-                  key={year}
-                  value={year}
-                >
-                  {year}
-                </option>
-              ))}
+              {availableYears.map(
+                (year) => (
+                  <option
+                    key={year}
+                    value={year}
+                  >
+                    {year}
+                  </option>
+                )
+              )}
             </select>
-
           </div>
-
         </div>
 
         {/* TABLE */}
 
-        <div className="bg-white rounded-xl shadow-lg overflow-hidden">
-
-          <div className="p-6 border-b">
+        <div className="overflow-hidden rounded-xl bg-white shadow-lg">
+          <div className="border-b p-6">
             <h2 className="text-xl font-bold">
               Employee Performance
             </h2>
 
-            <p className="text-sm text-gray-500 mt-1">
-              {filteredRecords.length} record(s)
-              found
+            <p className="mt-1 text-sm text-gray-500">
+              {filteredRecords.length}{" "}
+              weekly report(s) found
             </p>
           </div>
 
           <div className="overflow-x-auto">
-
-            <table className="w-full">
-
+            <table className="min-w-[1100px] w-full">
               <thead className="bg-gray-100">
-
                 <tr>
                   <th className="p-4 text-left">
                     Employee
@@ -441,20 +742,24 @@ export default function AdminSalesPerformancePage() {
                     Month
                   </th>
 
-                  <th className="p-4 text-left">
-                    Target
+                  <th className="p-4 text-center">
+                    Week
                   </th>
 
-                  <th className="p-4 text-left">
+                  <th className="p-4 text-center">
+                    Year
+                  </th>
+
+                  <th className="p-4 text-right">
+                    Monthly Target
+                  </th>
+
+                  <th className="p-4 text-right">
                     Completed
                   </th>
 
                   <th className="p-4 text-left">
-                    Pending
-                  </th>
-
-                  <th className="p-4 text-left">
-                    Achievement
+                    Remaining Time
                   </th>
 
                   <th className="p-4 text-left">
@@ -465,126 +770,117 @@ export default function AdminSalesPerformancePage() {
                     Action
                   </th>
                 </tr>
-
               </thead>
 
               <tbody>
-
-                {filteredRecords.length === 0 ? (
+                {filteredRecords.length ===
+                0 ? (
                   <tr>
                     <td
-                      colSpan={8}
-                      className="text-center py-12 text-gray-500"
+                      colSpan={9}
+                      className="py-12 text-center text-gray-500"
                     >
-                      No sales performance records
-                      found.
+                      No sales performance
+                      records found.
                     </td>
                   </tr>
                 ) : (
                   filteredRecords.map(
                     (record) => {
                       const target =
-                        Number(record.target) || 0;
+                        Number(
+                          record.target
+                        ) || 0;
 
                       const completed =
-                        Number(record.completed) || 0;
-
-                      const pending = Math.max(
-                        target - completed,
-                        0
-                      );
-
-                      const achievement =
-                        target > 0
-                          ? Math.round(
-                              (completed /
-                                target) *
-                                100
-                            )
-                          : 0;
+                        Number(
+                          record.completed
+                        ) || 0;
 
                       return (
                         <tr
                           key={record.id}
                           className="border-t hover:bg-gray-50"
                         >
+                          {/* EMPLOYEE */}
 
                           <td className="p-4">
-
                             <div className="font-semibold">
-                              {record.employee
+                              {record
+                                .employee
                                 ?.full_name ||
                                 "Unknown Employee"}
                             </div>
 
                             <div className="text-sm text-gray-500">
-                              {record.employee
-                                ?.email || "-"}
+                              {record
+                                .employee
+                                ?.email ||
+                                "-"}
                             </div>
 
-                            {record.employee
+                            {record
+                              .employee
                               ?.department && (
-                              <div className="text-xs text-gray-400 mt-1">
+                              <div className="mt-1 text-xs text-gray-400">
                                 {
-                                  record.employee
+                                  record
+                                    .employee
                                     .department
                                 }
                               </div>
                             )}
-
                           </td>
+
+                          {/* MONTH */}
 
                           <td className="p-4 font-medium">
                             {MONTHS[
-                              record.month - 1
-                            ] || "-"}{" "}
+                              Number(
+                                record.month
+                              ) - 1
+                            ] || "-"}
+                          </td>
+
+                          {/* WEEK */}
+
+                          <td className="p-4 text-center font-semibold">
+                            Week{" "}
+                            {
+                              record.week_number
+                            }
+                          </td>
+
+                          {/* YEAR */}
+
+                          <td className="p-4 text-center">
                             {record.year}
                           </td>
 
-                          <td className="p-4 font-semibold">
-                            {target}
+                          {/* TARGET */}
+
+                          <td className="p-4 text-right font-semibold">
+                            {target.toLocaleString()}
                           </td>
 
-                          <td className="p-4">
+                          {/* COMPLETED */}
+
+                          <td className="p-4 text-right">
                             <span className="font-semibold text-green-600">
-                              {completed}
+                              {completed.toLocaleString()}
                             </span>
                           </td>
 
+                          {/* REMAINING */}
+
                           <td className="p-4">
-                            <span className="font-semibold text-orange-600">
-                              {pending}
-                            </span>
+                            {record.remaining_time ||
+                              "-"}
                           </td>
 
-                          <td className="p-4">
-
-                            <div className="min-w-[110px]">
-
-                              <div className="font-semibold text-blue-600 mb-2">
-                                {achievement}%
-                              </div>
-
-                              <div className="w-full h-2 bg-gray-200 rounded-full overflow-hidden">
-
-                                <div
-                                  className="h-full bg-blue-600 rounded-full"
-                                  style={{
-                                    width: `${Math.min(
-                                      achievement,
-                                      100
-                                    )}%`,
-                                  }}
-                                />
-
-                              </div>
-
-                            </div>
-
-                          </td>
+                          {/* FILE */}
 
                           <td className="p-4">
-
                             {record.file_path ? (
                               <button
                                 type="button"
@@ -593,7 +889,7 @@ export default function AdminSalesPerformancePage() {
                                     record.file_path
                                   )
                                 }
-                                className="px-3 py-2 rounded-lg bg-green-600 text-white text-sm font-medium hover:bg-green-700"
+                                className="rounded-lg bg-green-600 px-3 py-2 text-sm font-medium text-white hover:bg-green-700"
                               >
                                 View Excel
                               </button>
@@ -602,72 +898,67 @@ export default function AdminSalesPerformancePage() {
                                 No File
                               </span>
                             )}
-
                           </td>
 
+                          {/* ACTION */}
+
                           <td className="p-4">
-
                             <div className="flex justify-center">
-
                               <button
                                 type="button"
                                 onClick={() =>
-                                  openDetails(record)
+                                  openDetails(
+                                    record
+                                  )
                                 }
-                                className="px-4 py-2 rounded-lg bg-violet-600 text-white text-sm font-medium hover:bg-violet-700"
+                                className="rounded-lg bg-violet-600 px-4 py-2 text-sm font-medium text-white hover:bg-violet-700"
                               >
                                 View
                               </button>
-
                             </div>
-
                           </td>
-
                         </tr>
                       );
                     }
                   )
                 )}
-
               </tbody>
-
             </table>
-
           </div>
-
         </div>
-
       </div>
 
       {/* DETAILS MODAL */}
 
       {showModal && selectedRecord && (
         <div
-          className="fixed inset-0 z-50 bg-black/50 flex items-center justify-center p-4"
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4"
           onClick={closeDetails}
         >
-
           <div
-            className="bg-white rounded-2xl shadow-xl w-full max-w-3xl max-h-[90vh] overflow-y-auto"
+            className="max-h-[90vh] w-full max-w-3xl overflow-y-auto rounded-2xl bg-white shadow-xl"
             onClick={(e) =>
               e.stopPropagation()
             }
           >
-
             {/* MODAL HEADER */}
 
-            <div className="flex items-center justify-between p-6 border-b">
-
+            <div className="flex items-center justify-between border-b p-6">
               <div>
                 <h2 className="text-2xl font-bold">
                   Performance Details
                 </h2>
 
-                <p className="text-gray-500 text-sm mt-1">
+                <p className="mt-1 text-sm text-gray-500">
                   {MONTHS[
-                    selectedRecord.month - 1
-                  ]}{" "}
-                  {selectedRecord.year}
+                    Number(
+                      selectedRecord.month
+                    ) - 1
+                  ] || "-"}{" "}
+                  {selectedRecord.year} • Week{" "}
+                  {
+                    selectedRecord.week_number
+                  }
                 </p>
               </div>
 
@@ -678,25 +969,22 @@ export default function AdminSalesPerformancePage() {
               >
                 ×
               </button>
-
             </div>
 
-            {/* EMPLOYEE */}
-
             <div className="p-6">
+              {/* EMPLOYEE */}
 
-              <div className="bg-gray-50 rounded-xl p-5 mb-6">
-
-                <h3 className="font-bold text-lg mb-4">
+              <div className="mb-6 rounded-xl bg-gray-50 p-5">
+                <h3 className="mb-4 text-lg font-bold">
                   Employee
                 </h3>
 
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-
+                <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
                   <Detail
                     label="Name"
                     value={
-                      selectedRecord.employee
+                      selectedRecord
+                        .employee
                         ?.full_name || "-"
                     }
                   />
@@ -704,15 +992,17 @@ export default function AdminSalesPerformancePage() {
                   <Detail
                     label="Email"
                     value={
-                      selectedRecord.employee
-                        ?.email || "-"
+                      selectedRecord
+                        .employee?.email ||
+                      "-"
                     }
                   />
 
                   <Detail
                     label="Department"
                     value={
-                      selectedRecord.employee
+                      selectedRecord
+                        .employee
                         ?.department || "-"
                     }
                   />
@@ -720,78 +1010,138 @@ export default function AdminSalesPerformancePage() {
                   <Detail
                     label="Designation"
                     value={
-                      selectedRecord.employee
+                      selectedRecord
+                        .employee
                         ?.designation || "-"
                     }
                   />
-
                 </div>
-
               </div>
 
-              {/* PERFORMANCE */}
+              {/* REPORT INFO */}
 
-              <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-6">
-
+              <div className="mb-6 grid grid-cols-1 gap-4 sm:grid-cols-3">
                 <MiniCard
-                  title="Target"
-                  value={Number(
-                    selectedRecord.target
-                  )}
+                  title="Month"
+                  value={
+                    MONTHS[
+                      Number(
+                        selectedRecord.month
+                      ) - 1
+                    ] || "-"
+                  }
                   color="text-violet-600"
                 />
 
                 <MiniCard
-                  title="Completed"
+                  title="Week"
+                  value={`Week ${selectedRecord.week_number}`}
+                  color="text-blue-600"
+                />
+
+                <MiniCard
+                  title="Year"
+                  value={
+                    selectedRecord.year
+                  }
+                  color="text-gray-900"
+                />
+              </div>
+
+              {/* SELECTED WEEK */}
+
+              <h3 className="mb-3 text-lg font-bold">
+                Weekly Report
+              </h3>
+
+              <div className="mb-6 grid grid-cols-1 gap-4 sm:grid-cols-2">
+                <MiniCard
+                  title="Monthly Target"
+                  value={Number(
+                    selectedRecord.target
+                  ).toLocaleString()}
+                  color="text-violet-600"
+                />
+
+                <MiniCard
+                  title={`Week ${selectedRecord.week_number} Completed`}
                   value={Number(
                     selectedRecord.completed
-                  )}
+                  ).toLocaleString()}
+                  color="text-green-600"
+                />
+              </div>
+
+              {/* MONTHLY PROGRESS */}
+
+              <h3 className="mb-3 text-lg font-bold">
+                Monthly Progress
+              </h3>
+
+              <div className="mb-6 grid grid-cols-1 gap-4 sm:grid-cols-3">
+                <MiniCard
+                  title="Target"
+                  value={selectedMonthlyStats.target.toLocaleString()}
+                  color="text-violet-600"
+                />
+
+                <MiniCard
+                  title="Total Completed"
+                  value={selectedMonthlyStats.completed.toLocaleString()}
                   color="text-green-600"
                 />
 
                 <MiniCard
                   title="Pending"
-                  value={Math.max(
-                    Number(
-                      selectedRecord.target
-                    ) -
-                      Number(
-                        selectedRecord.completed
-                      ),
-                    0
-                  )}
+                  value={selectedMonthlyStats.pending.toLocaleString()}
                   color="text-orange-600"
                 />
-
               </div>
 
-              <div className="bg-blue-50 rounded-xl p-5 mb-6">
+              {/* ACHIEVEMENT */}
 
-                <p className="text-sm text-gray-500">
-                  Achievement
-                </p>
+              <div className="mb-6 rounded-xl bg-blue-50 p-5">
+                <div className="flex items-center justify-between gap-4">
+                  <div>
+                    <p className="text-sm text-gray-500">
+                      Monthly Achievement
+                    </p>
 
-                <p className="text-3xl font-bold text-blue-600 mt-1">
-                  {Number(
-                    selectedRecord.target
-                  ) > 0
-                    ? Math.round(
-                        (Number(
-                          selectedRecord.completed
-                        ) /
-                          Number(
-                            selectedRecord.target
-                          )) *
-                          100
-                      )
-                    : 0}
-                  %
-                </p>
+                    <p className="mt-1 text-3xl font-bold text-blue-600">
+                      {
+                        selectedMonthlyStats.achievement
+                      }
+                      %
+                    </p>
+                  </div>
 
+                  <div className="text-right text-sm text-gray-500">
+                    {
+                      selectedMonthlyStats.completed
+                    .toLocaleString()}
+                    {" / "}
+                    {
+                      selectedMonthlyStats.target
+                    .toLocaleString()}
+                  </div>
+                </div>
+
+                <div className="mt-4 h-3 w-full overflow-hidden rounded-full bg-blue-100">
+                  <div
+                    className="h-full rounded-full bg-blue-600 transition-all"
+                    style={{
+                      width: `${Math.min(
+                        selectedMonthlyStats.achievement,
+                        100
+                      )}%`,
+                    }}
+                  />
+                </div>
               </div>
 
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-5 mb-6">
+              {/* EXTRA DETAILS */}
 
+              <div className="mb-6 grid grid-cols-1 gap-5 md:grid-cols-2">
                 <Detail
                   label="Remaining Time"
                   value={
@@ -808,7 +1158,16 @@ export default function AdminSalesPerformancePage() {
                   }
                 />
 
+                <Detail
+                  label="Performance Date"
+                  value={
+                    selectedRecord.performance_date ||
+                    "-"
+                  }
+                />
               </div>
+
+              {/* FILE */}
 
               {selectedRecord.file_path && (
                 <button
@@ -818,22 +1177,24 @@ export default function AdminSalesPerformancePage() {
                       selectedRecord.file_path
                     )
                   }
-                  className="w-full bg-green-600 text-white rounded-lg py-3 font-semibold hover:bg-green-700"
+                  className="w-full rounded-lg bg-green-600 py-3 font-semibold text-white hover:bg-green-700"
                 >
                   View Uploaded Excel
                 </button>
               )}
-
             </div>
-
           </div>
-
         </div>
       )}
-
     </>
   );
 }
+
+/*
+ * ---------------------------------------------------------
+ * SUMMARY CARD
+ * ---------------------------------------------------------
+ */
 
 function SummaryCard({
   title,
@@ -845,19 +1206,27 @@ function SummaryCard({
   color: string;
 }) {
   return (
-    <div className="bg-white rounded-xl shadow-lg p-6">
-      <p className="text-gray-500 text-sm">
+    <div className="rounded-xl bg-white p-6 shadow-lg">
+      <p className="text-sm text-gray-500">
         {title}
       </p>
 
       <h2
-        className={`text-3xl font-bold mt-2 ${color}`}
+        className={`mt-2 text-3xl font-bold ${color}`}
       >
-        {value}
+        {typeof value === "number"
+          ? value.toLocaleString()
+          : value}
       </h2>
     </div>
   );
 }
+
+/*
+ * ---------------------------------------------------------
+ * MINI CARD
+ * ---------------------------------------------------------
+ */
 
 function MiniCard({
   title,
@@ -869,19 +1238,27 @@ function MiniCard({
   color: string;
 }) {
   return (
-    <div className="border rounded-xl p-5">
-      <p className="text-gray-500 text-sm">
+    <div className="rounded-xl border p-5">
+      <p className="text-sm text-gray-500">
         {title}
       </p>
 
       <p
-        className={`text-2xl font-bold mt-1 ${color}`}
+        className={`mt-1 text-2xl font-bold ${color}`}
       >
-        {value}
+        {typeof value === "number"
+          ? value.toLocaleString()
+          : value}
       </p>
     </div>
   );
 }
+
+/*
+ * ---------------------------------------------------------
+ * DETAIL
+ * ---------------------------------------------------------
+ */
 
 function Detail({
   label,
@@ -896,7 +1273,7 @@ function Detail({
         {label}
       </p>
 
-      <p className="font-semibold mt-1 break-words">
+      <p className="mt-1 break-words font-semibold">
         {value}
       </p>
     </div>

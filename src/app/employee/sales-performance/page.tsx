@@ -8,16 +8,17 @@ const supabase = createClient();
 interface SalesPerformance {
   id: string;
   employee_id: string;
+  performance_date: string;
   month: number;
+  week_number: number;
   year: number;
   target: number;
   completed: number;
-  pending_target: number;
   remaining_time: string | null;
   file_name: string | null;
   file_path: string | null;
-  created_at: string;
-  updated_at: string;
+  created_at?: string;
+  updated_at?: string;
 }
 
 interface Employee {
@@ -41,35 +42,30 @@ const MONTHS = [
   "December",
 ];
 
+const WEEKS = [1, 2, 3, 4, 5];
+
 export default function SalesPerformancePage() {
   const today = new Date();
 
-  const [pageLoading, setPageLoading] =
-    useState(true);
+  const [pageLoading, setPageLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
 
-  const [saving, setSaving] =
-    useState(false);
+  const [employee, setEmployee] = useState<Employee | null>(null);
+  const [history, setHistory] = useState<SalesPerformance[]>([]);
 
-  const [employee, setEmployee] =
-    useState<Employee | null>(null);
+  const [selectedMonth, setSelectedMonth] = useState(
+    today.getMonth() + 1
+  );
 
-  const [history, setHistory] =
-    useState<SalesPerformance[]>([]);
+  const [selectedWeek, setSelectedWeek] = useState(1);
 
-  const [selectedMonth, setSelectedMonth] =
-    useState(today.getMonth() + 1);
+  const [selectedYear, setSelectedYear] = useState(
+    today.getFullYear()
+  );
 
-  const [selectedYear, setSelectedYear] =
-    useState(today.getFullYear());
-
-  const [target, setTarget] =
-    useState("");
-
-  const [completed, setCompleted] =
-    useState("");
-
-  const [remainingTime, setRemainingTime] =
-    useState("");
+  const [target, setTarget] = useState("");
+  const [completed, setCompleted] = useState("");
+  const [remainingTime, setRemainingTime] = useState("");
 
   const [selectedFile, setSelectedFile] =
     useState<File | null>(null);
@@ -77,198 +73,254 @@ export default function SalesPerformancePage() {
   const [editingId, setEditingId] =
     useState<string | null>(null);
 
+  // ---------------------------------------------------------
+  // INITIALIZE
+  // ---------------------------------------------------------
+
   useEffect(() => {
-    initializePage();
+    void initializePage();
   }, []);
 
   async function initializePage() {
     setPageLoading(true);
 
-    const {
-      data: { user },
-      error: userError,
-    } = await supabase.auth.getUser();
-
-    if (userError) {
-      console.error(
-        "User Error:",
-        userError
-      );
-
-      setPageLoading(false);
-      return;
-    }
-
-    if (!user) {
-      setPageLoading(false);
-      return;
-    }
-
-    let employeeData: Employee | null =
-      null;
-
-    const {
-      data: employeeByAuth,
-      error: authEmployeeError,
-    } = await supabase
-      .from("employees")
-      .select("id, full_name, email")
-      .eq("auth_id", user.id)
-      .maybeSingle();
-
-    if (
-      !authEmployeeError &&
-      employeeByAuth
-    ) {
-      employeeData = employeeByAuth;
-    }
-
-    if (
-      !employeeData &&
-      user.email
-    ) {
+    try {
       const {
-        data: employeeByEmail,
-        error: emailEmployeeError,
+        data: { user },
+        error: userError,
+      } = await supabase.auth.getUser();
+
+      if (userError) {
+        console.log("AUTH ERROR");
+        console.log(userError.message);
+        return;
+      }
+
+      if (!user) {
+        return;
+      }
+
+      let employeeData: Employee | null = null;
+
+      // Try auth_id first
+      const {
+        data: employeeByAuth,
+        error: authEmployeeError,
       } = await supabase
         .from("employees")
         .select("id, full_name, email")
-        .eq("email", user.email)
+        .eq("auth_id", user.id)
         .maybeSingle();
 
-      if (
-        !emailEmployeeError &&
-        employeeByEmail
-      ) {
-        employeeData =
-          employeeByEmail;
+      if (authEmployeeError) {
+        console.log(
+          "Employee auth lookup:",
+          authEmployeeError.message
+        );
       }
-    }
 
-    if (!employeeData) {
-      console.error(
-        "Employee profile not found."
-      );
+      if (employeeByAuth) {
+        employeeData = employeeByAuth as Employee;
+      }
 
+      // Fallback email
+      if (!employeeData && user.email) {
+        const {
+          data: employeeByEmail,
+          error: emailEmployeeError,
+        } = await supabase
+          .from("employees")
+          .select("id, full_name, email")
+          .eq("email", user.email)
+          .maybeSingle();
+
+        if (emailEmployeeError) {
+          console.log(
+            "Employee email lookup:",
+            emailEmployeeError.message
+          );
+        }
+
+        if (employeeByEmail) {
+          employeeData = employeeByEmail as Employee;
+        }
+      }
+
+      if (!employeeData) {
+        console.log("Employee profile not found");
+        return;
+      }
+
+      setEmployee(employeeData);
+
+      await loadHistory(employeeData.id);
+    } catch (error) {
+      console.log("INITIALIZE FAILED");
+      console.log(error);
+    } finally {
       setPageLoading(false);
-      return;
     }
-
-    setEmployee(employeeData);
-
-    await loadHistory(
-      employeeData.id
-    );
-
-    setPageLoading(false);
   }
 
-  async function loadHistory(
-    employeeId: string
-  ) {
-    const { data, error } =
-      await supabase
-        .from("sales_performance")
-        .select("*")
-        .eq(
-          "employee_id",
-          employeeId
-        )
-        .order("year", {
-          ascending: false,
-        })
-        .order("month", {
-          ascending: false,
-        });
+  // ---------------------------------------------------------
+  // LOAD HISTORY
+  // ---------------------------------------------------------
+
+  async function loadHistory(employeeId: string) {
+    const { data, error } = await supabase
+      .from("sales_performance")
+      .select(
+        `
+          id,
+          employee_id,
+          performance_date,
+          month,
+          week_number,
+          year,
+          target,
+          completed,
+          remaining_time,
+          file_name,
+          file_path,
+          created_at,
+          updated_at
+        `
+      )
+      .eq("employee_id", employeeId)
+      .order("year", { ascending: false })
+      .order("month", { ascending: false })
+      .order("week_number", { ascending: false });
 
     if (error) {
-      console.error(
-        "Sales History Error:",
-        error
+      console.log("LOAD HISTORY FAILED");
+      console.log("CODE:", error.code);
+      console.log("MESSAGE:", error.message);
+      console.log("DETAILS:", error.details);
+      console.log("HINT:", error.hint);
+
+      alert(
+        `Unable to load history:\n${error.message}`
       );
 
+      setHistory([]);
       return;
     }
 
-    setHistory(
-      (data || []) as SalesPerformance[]
-    );
+    setHistory((data ?? []) as SalesPerformance[]);
   }
 
-  const targetNumber =
-    Number(target) || 0;
+  // ---------------------------------------------------------
+  // AUTO LOAD MONTHLY TARGET
+  // ---------------------------------------------------------
 
-  const completedNumber =
-    Number(completed) || 0;
+  useEffect(() => {
+    if (editingId) {
+      return;
+    }
 
-  const pendingTarget =
-    Math.max(
-      targetNumber - completedNumber,
-      0
+    const existingMonthRecord = history.find(
+      (record) =>
+        Number(record.month) === Number(selectedMonth) &&
+        Number(record.year) === Number(selectedYear)
     );
 
-  const achievement =
-    targetNumber > 0
-      ? Math.min(
-          Math.round(
-            (completedNumber /
-              targetNumber) *
-              100
-          ),
-          100
-        )
-      : 0;
-        function resetForm() {
-    setSelectedMonth(
-      today.getMonth() + 1
-    );
+    if (existingMonthRecord) {
+      setTarget(String(existingMonthRecord.target));
+    } else {
+      setTarget("");
+    }
+  }, [
+    history,
+    selectedMonth,
+    selectedYear,
+    editingId,
+  ]);
 
-    setSelectedYear(
-      today.getFullYear()
-    );
+  // ---------------------------------------------------------
+  // CLEAR FILE
+  // ---------------------------------------------------------
 
-    setTarget("");
+  function clearFileInput() {
+    const input = document.getElementById(
+      "sales-file"
+    ) as HTMLInputElement | null;
+
+    if (input) {
+      input.value = "";
+    }
+  }
+
+  // ---------------------------------------------------------
+  // RESET FORM
+  // ---------------------------------------------------------
+
+  function resetForm() {
     setCompleted("");
     setRemainingTime("");
     setSelectedFile(null);
     setEditingId(null);
 
-    const fileInput =
-      document.getElementById(
-        "sales-file"
-      ) as HTMLInputElement | null;
+    clearFileInput();
 
-    if (fileInput) {
-      fileInput.value = "";
+    const existingMonthRecord = history.find(
+      (record) =>
+        Number(record.month) === Number(selectedMonth) &&
+        Number(record.year) === Number(selectedYear)
+    );
+
+    if (existingMonthRecord) {
+      setTarget(String(existingMonthRecord.target));
+    } else {
+      setTarget("");
     }
   }
 
-  function handleEdit(
-    record: SalesPerformance
-  ) {
+  // ---------------------------------------------------------
+  // CANCEL EDIT
+  // ---------------------------------------------------------
+
+  function cancelEdit() {
+    setEditingId(null);
+    setCompleted("");
+    setRemainingTime("");
+    setSelectedFile(null);
+
+    clearFileInput();
+
+    const existingMonthRecord = history.find(
+      (record) =>
+        Number(record.month) === Number(selectedMonth) &&
+        Number(record.year) === Number(selectedYear)
+    );
+
+    if (existingMonthRecord) {
+      setTarget(String(existingMonthRecord.target));
+    } else {
+      setTarget("");
+    }
+  }
+
+  // ---------------------------------------------------------
+  // EDIT
+  // ---------------------------------------------------------
+
+  function handleEdit(record: SalesPerformance) {
     setEditingId(record.id);
 
-    setSelectedMonth(
-      record.month
-    );
+    setSelectedMonth(Number(record.month));
+    setSelectedWeek(Number(record.week_number));
+    setSelectedYear(Number(record.year));
 
-    setSelectedYear(
-      record.year
-    );
-
-    setTarget(
-      String(record.target)
-    );
-
-    setCompleted(
-      String(record.completed)
-    );
+    setTarget(String(record.target ?? ""));
+    setCompleted(String(record.completed ?? ""));
 
     setRemainingTime(
-      record.remaining_time || ""
+      record.remaining_time ?? ""
     );
 
     setSelectedFile(null);
+
+    clearFileInput();
 
     window.scrollTo({
       top: 0,
@@ -276,308 +328,455 @@ export default function SalesPerformancePage() {
     });
   }
 
+  // ---------------------------------------------------------
+  // SUBMIT
+  // ---------------------------------------------------------
+
   async function handleSubmit(
-    e: React.FormEvent
+    e: React.FormEvent<HTMLFormElement>
   ) {
     e.preventDefault();
 
     if (!employee) {
-      alert(
-        "Employee profile not found."
-      );
+      alert("Employee profile not found.");
       return;
     }
 
-    if (targetNumber <= 0) {
-      alert(
-        "Please enter a valid target."
-      );
-      return;
-    }
+    const normalizedTarget = target
+      .trim()
+      .replace(/,/g, "");
 
-    if (completedNumber < 0) {
-      alert(
-        "Completed value cannot be negative."
-      );
+    const normalizedCompleted = completed
+      .trim()
+      .replace(/,/g, "");
+
+    const targetNumber = Number(normalizedTarget);
+    const completedNumber = Number(
+      normalizedCompleted
+    );
+
+    if (
+      !normalizedTarget ||
+      !Number.isFinite(targetNumber) ||
+      targetNumber <= 0
+    ) {
+      alert("Enter a valid monthly target.");
       return;
     }
 
     if (
-      completedNumber >
-      targetNumber
+      !normalizedCompleted ||
+      !Number.isFinite(completedNumber) ||
+      completedNumber < 0
     ) {
       alert(
-        "Completed value cannot be greater than target."
+        "Enter a valid completed sales value."
       );
+      return;
+    }
+
+    // -------------------------------------------------------
+    // CHECK SAME MONTH TARGET
+    // -------------------------------------------------------
+
+    const otherMonthRecords = history.filter(
+      (record) =>
+        Number(record.month) === Number(selectedMonth) &&
+        Number(record.year) === Number(selectedYear) &&
+        record.id !== editingId
+    );
+
+    if (otherMonthRecords.length > 0) {
+      const existingTarget = Number(
+        otherMonthRecords[0].target
+      );
+
+      if (existingTarget !== targetNumber) {
+        alert(
+          `Monthly target for ${
+            MONTHS[selectedMonth - 1]
+          } ${selectedYear} is already ${existingTarget.toLocaleString()}.`
+        );
+
+        return;
+      }
+    }
+
+    // -------------------------------------------------------
+    // DUPLICATE WEEK CHECK
+    // -------------------------------------------------------
+
+    const duplicate = history.find(
+      (record) =>
+        record.employee_id === employee.id &&
+        Number(record.month) === Number(selectedMonth) &&
+        Number(record.week_number) ===
+          Number(selectedWeek) &&
+        Number(record.year) === Number(selectedYear) &&
+        record.id !== editingId
+    );
+
+    if (duplicate) {
+      alert(
+        `Week ${selectedWeek} already exists for ${
+          MONTHS[selectedMonth - 1]
+        } ${selectedYear}.\n\nPlease edit the existing report.`
+      );
+
       return;
     }
 
     setSaving(true);
 
-    try {
-      let fileName: string | null =
-        null;
+    let newlyUploadedPath: string | null = null;
 
-      let filePath: string | null =
-        null;
+    try {
+      let fileName: string | null = null;
+      let filePath: string | null = null;
+
+      // -----------------------------------------------------
+      // EXISTING FILE WHILE EDITING
+      // -----------------------------------------------------
 
       if (editingId) {
-        const existingRecord =
-          history.find(
-            (item) =>
-              item.id === editingId
-          );
+        const oldRecord = history.find(
+          (record) => record.id === editingId
+        );
 
         fileName =
-          existingRecord?.file_name ||
-          null;
+          oldRecord?.file_name ?? null;
 
         filePath =
-          existingRecord?.file_path ||
-          null;
+          oldRecord?.file_path ?? null;
       }
+
+      // -----------------------------------------------------
+      // UPLOAD FILE
+      // -----------------------------------------------------
 
       if (selectedFile) {
         const extension =
           selectedFile.name
             .split(".")
-            .pop();
+            .pop()
+            ?.toLowerCase() ?? "";
 
-        const safeFileName =
-          `${employee.id}/${selectedYear}-${selectedMonth}-${Date.now()}.${extension}`;
+        const allowed = [
+          "xlsx",
+          "xls",
+          "csv",
+        ];
 
-        const {
-          error: uploadError,
-        } = await supabase.storage
-          .from(
-            "sales-performance-files"
-          )
-          .upload(
-            safeFileName,
-            selectedFile,
-            {
-              upsert: false,
-            }
+        if (!allowed.includes(extension)) {
+          alert(
+            "Only XLSX, XLS and CSV files are allowed."
           );
+
+          return;
+        }
+
+        const storagePath =
+          `${employee.id}/` +
+          `${selectedYear}/` +
+          `${selectedMonth}/` +
+          `week-${selectedWeek}-${Date.now()}.${extension}`;
+
+        const { error: uploadError } =
+          await supabase.storage
+            .from("sales-performance-files")
+            .upload(
+              storagePath,
+              selectedFile,
+              {
+                upsert: false,
+                cacheControl: "3600",
+              }
+            );
 
         if (uploadError) {
-          console.error(
-            "File Upload Error:",
-            uploadError
-          );
-
-          alert(
+          console.log("UPLOAD FAILED");
+          console.log(
+            "MESSAGE:",
             uploadError.message
           );
 
-          setSaving(false);
+          alert(
+            `File upload failed:\n${uploadError.message}`
+          );
+
           return;
         }
 
-        fileName =
-          selectedFile.name;
-
-        filePath =
-          safeFileName;
+        newlyUploadedPath = storagePath;
+        fileName = selectedFile.name;
+        filePath = storagePath;
       }
+
+      // -----------------------------------------------------
+      // PERFORMANCE DATE
+      // -----------------------------------------------------
+
+    const performanceDate =
+  `${selectedYear}-${String(selectedMonth).padStart(
+    2,
+    "0"
+  )}-${String(
+    Math.min((selectedWeek - 1) * 7 + 1, 28)
+  ).padStart(2, "0")}`;
+
+      // -----------------------------------------------------
+      // PAYLOAD
+      // -----------------------------------------------------
 
       const payload = {
-        employee_id:
-          employee.id,
+        employee_id: employee.id,
 
-        month:
-          selectedMonth,
+        performance_date: performanceDate,
 
-        year:
-          selectedYear,
+        month: selectedMonth,
+        week_number: selectedWeek,
+        year: selectedYear,
 
-        target:
-          targetNumber,
-
-        completed:
-          completedNumber,
-
-        pending_target:
-          pendingTarget,
+        target: targetNumber,
+        completed: completedNumber,
 
         remaining_time:
-          remainingTime.trim() ||
-          null,
+          remainingTime.trim() || null,
 
-        file_name:
-          fileName,
-
-        file_path:
-          filePath,
+        file_name: fileName,
+        file_path: filePath,
       };
 
+      console.log("PAYLOAD:", payload);
+
+      // -----------------------------------------------------
+      // UPDATE
+      // -----------------------------------------------------
+
       if (editingId) {
-        const { error } =
-          await supabase
-            .from(
-              "sales_performance"
-            )
-            .update(payload)
-            .eq(
-              "id",
-              editingId
-            )
-            .eq(
-              "employee_id",
-              employee.id
-            );
-
-        if (error) {
-          console.error(
-            "Update Error:",
-            error
-          );
-
-          alert(error.message);
-
-          setSaving(false);
-          return;
-        }
-
-        alert(
-          "Sales performance updated successfully."
-        );
-      } else {
         const {
-          data: existingRecord,
-          error:
-            existingRecordError,
+          data: updatedData,
+          error: updateError,
         } = await supabase
-          .from(
-            "sales_performance"
-          )
-          .select("id")
-          .eq(
-            "employee_id",
-            employee.id
-          )
-          .eq(
-            "month",
-            selectedMonth
-          )
-          .eq(
-            "year",
-            selectedYear
-          )
-          .maybeSingle();
+          .from("sales_performance")
+          .update(payload)
+          .eq("id", editingId)
+          .eq("employee_id", employee.id)
+          .select();
 
-        if (
-          existingRecordError
-        ) {
-          console.error(
-            "Existing Record Error:",
-            existingRecordError
+        if (updateError) {
+          if (newlyUploadedPath) {
+            await supabase.storage
+              .from("sales-performance-files")
+              .remove([newlyUploadedPath]);
+          }
+
+          console.log(
+            "===== UPDATE FAILED ====="
+          );
+          console.log(
+            "CODE:",
+            updateError.code
+          );
+          console.log(
+            "MESSAGE:",
+            updateError.message
+          );
+          console.log(
+            "DETAILS:",
+            updateError.details
+          );
+          console.log(
+            "HINT:",
+            updateError.hint
           );
 
           alert(
-            existingRecordError.message
+            [
+              "Unable to update report.",
+              "",
+              `Code: ${updateError.code || "N/A"}`,
+              `Message: ${
+                updateError.message || "N/A"
+              }`,
+              `Details: ${
+                updateError.details || "N/A"
+              }`,
+              `Hint: ${
+                updateError.hint || "N/A"
+              }`,
+            ].join("\n")
           );
 
-          setSaving(false);
           return;
         }
 
-        if (existingRecord) {
-          alert(
-            "Performance for this month already exists. Please edit the existing record."
-          );
+        console.log(
+          "UPDATE SUCCESS:",
+          updatedData
+        );
 
-          setSaving(false);
-          return;
-        }
+        await loadHistory(employee.id);
 
-        const { error } =
-          await supabase
-            .from(
-              "sales_performance"
-            )
-            .insert(payload);
-
-        if (error) {
-          console.error(
-            "Insert Error:",
-            error
-          );
-
-          alert(error.message);
-
-          setSaving(false);
-          return;
-        }
+        resetForm();
 
         alert(
-          "Sales performance uploaded successfully."
+          "Weekly sales performance updated successfully."
         );
+
+        return;
       }
 
-      await loadHistory(
-        employee.id
+      // -----------------------------------------------------
+      // INSERT
+      // -----------------------------------------------------
+
+      const {
+        data: insertedData,
+        error: insertError,
+      } = await supabase
+        .from("sales_performance")
+        .insert(payload)
+        .select();
+
+      if (insertError) {
+        if (newlyUploadedPath) {
+          await supabase.storage
+            .from("sales-performance-files")
+            .remove([newlyUploadedPath]);
+        }
+
+        console.log(
+          "===== SALES INSERT FAILED ====="
+        );
+
+        console.log(
+          "CODE:",
+          insertError.code
+        );
+
+        console.log(
+          "MESSAGE:",
+          insertError.message
+        );
+
+        console.log(
+          "DETAILS:",
+          insertError.details
+        );
+
+        console.log(
+          "HINT:",
+          insertError.hint
+        );
+
+        console.log(
+          "PAYLOAD:",
+          payload
+        );
+
+        alert(
+          [
+            "Unable to save report.",
+            "",
+            `Code: ${insertError.code || "N/A"}`,
+            `Message: ${
+              insertError.message || "N/A"
+            }`,
+            `Details: ${
+              insertError.details || "N/A"
+            }`,
+            `Hint: ${
+              insertError.hint || "N/A"
+            }`,
+          ].join("\n")
+        );
+
+        return;
+      }
+
+      console.log(
+        "INSERT SUCCESS:",
+        insertedData
       );
+
+      // Reload DB data BEFORE resetting form
+      await loadHistory(employee.id);
 
       resetForm();
-    } catch (error) {
-      console.error(
-        "Sales Performance Error:",
-        error
-      );
 
       alert(
-        "Something went wrong."
+        "Weekly sales performance uploaded successfully."
+      );
+    } catch (error) {
+      console.log(
+        "===== UNEXPECTED SALES ERROR ====="
+      );
+
+      console.log(error);
+
+      if (newlyUploadedPath) {
+        await supabase.storage
+          .from("sales-performance-files")
+          .remove([newlyUploadedPath]);
+      }
+
+      alert(
+        "Something unexpected went wrong."
       );
     } finally {
       setSaving(false);
     }
   }
 
+  // ---------------------------------------------------------
+  // VIEW FILE
+  // ---------------------------------------------------------
+
   async function viewFile(
     filePath: string | null
   ) {
     if (!filePath) {
-      alert(
-        "No file uploaded for this record."
-      );
+      alert("No file uploaded.");
       return;
     }
 
-    const {
-      data,
-      error,
-    } = await supabase.storage
-      .from(
-        "sales-performance-files"
-      )
-      .createSignedUrl(
-        filePath,
-        60
-      );
+    const { data, error } =
+      await supabase.storage
+        .from("sales-performance-files")
+        .createSignedUrl(filePath, 60);
 
     if (error) {
-      console.error(
-        "File View Error:",
-        error
+      console.log("VIEW FILE FAILED");
+      console.log(error.message);
+
+      alert(
+        `Unable to open file:\n${error.message}`
       );
 
-      alert(error.message);
       return;
     }
 
-    if (data?.signedUrl) {
-      window.open(
-        data.signedUrl,
-        "_blank",
-        "noopener,noreferrer"
-      );
+    if (!data?.signedUrl) {
+      alert("Unable to generate file URL.");
+      return;
     }
+
+    window.open(
+      data.signedUrl,
+      "_blank",
+      "noopener,noreferrer"
+    );
   }
-    if (pageLoading) {
+
+  // ---------------------------------------------------------
+  // LOADING
+  // ---------------------------------------------------------
+
+  if (pageLoading) {
     return (
       <div className="p-8">
-        <div className="bg-white rounded-xl shadow-lg p-8">
+        <div className="rounded-xl bg-white p-8 shadow-lg">
           <p className="text-lg font-semibold">
             Loading Sales Performance...
           </p>
@@ -586,11 +785,15 @@ export default function SalesPerformancePage() {
     );
   }
 
+  // ---------------------------------------------------------
+  // EMPLOYEE NOT FOUND
+  // ---------------------------------------------------------
+
   if (!employee) {
     return (
       <div className="p-8">
-        <div className="bg-white rounded-xl shadow-lg p-8">
-          <p className="text-red-600 font-semibold">
+        <div className="rounded-xl bg-white p-8 shadow-lg">
+          <p className="font-semibold text-red-600">
             Employee profile not found.
           </p>
         </div>
@@ -598,117 +801,77 @@ export default function SalesPerformancePage() {
     );
   }
 
+  // ---------------------------------------------------------
+  // UI
+  // ---------------------------------------------------------
+
   return (
     <div className="space-y-8 p-8">
-
       {/* HEADER */}
 
       <div>
         <h1 className="text-3xl font-bold">
-          Sales Performance
+          Weekly Sales Performance
         </h1>
 
-        <p className="text-gray-500 mt-1">
-          Upload and manage your monthly sales performance.
+        <p className="mt-1 text-gray-500">
+          Upload your weekly sales against your
+          monthly target.
         </p>
       </div>
 
-      {/* PERFORMANCE SUMMARY */}
-
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-5">
-
-        <div className="bg-white rounded-xl shadow-lg p-6">
-          <p className="text-sm text-gray-500">
-            Target
-          </p>
-
-          <h2 className="text-3xl font-bold text-violet-600 mt-2">
-            {targetNumber}
-          </h2>
-        </div>
-
-        <div className="bg-white rounded-xl shadow-lg p-6">
-          <p className="text-sm text-gray-500">
-            Completed
-          </p>
-
-          <h2 className="text-3xl font-bold text-green-600 mt-2">
-            {completedNumber}
-          </h2>
-        </div>
-
-        <div className="bg-white rounded-xl shadow-lg p-6">
-          <p className="text-sm text-gray-500">
-            Pending
-          </p>
-
-          <h2 className="text-3xl font-bold text-orange-500 mt-2">
-            {pendingTarget}
-          </h2>
-        </div>
-
-        <div className="bg-white rounded-xl shadow-lg p-6">
-          <p className="text-sm text-gray-500">
-            Achievement
-          </p>
-
-          <h2 className="text-3xl font-bold text-blue-600 mt-2">
-            {achievement}%
-          </h2>
-        </div>
-
-      </div>
-
-      {/* UPLOAD / EDIT FORM */}
+      {/* FORM */}
 
       <form
         onSubmit={handleSubmit}
-        className="bg-white rounded-xl shadow-lg p-8 space-y-6"
+        className="space-y-6 rounded-xl bg-white p-8 shadow-lg"
       >
-
-        <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-3">
-
+        <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
           <div>
             <h2 className="text-2xl font-bold">
               {editingId
-                ? "Edit Monthly Performance"
-                : "Upload Monthly Performance"}
+                ? "Edit Weekly Report"
+                : "Upload Weekly Report"}
             </h2>
 
-            <p className="text-gray-500 mt-1">
-              Enter your sales details and upload the Excel file.
+            <p className="mt-1 text-gray-500">
+              Upload this week&apos;s sales
+              performance.
             </p>
           </div>
 
           {editingId && (
             <button
               type="button"
-              onClick={resetForm}
-              className="px-4 py-2 border rounded-lg hover:bg-gray-50"
+              onClick={cancelEdit}
+              className="rounded-lg border px-4 py-2 hover:bg-gray-100"
             >
               Cancel Edit
             </button>
           )}
-
         </div>
 
-        {/* MONTH + YEAR */}
+        {/* MONTH / WEEK / YEAR */}
 
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
-
+        <div className="grid grid-cols-1 gap-5 md:grid-cols-3">
           <div>
-            <label className="block font-medium mb-2">
+            <label className="mb-2 block font-medium">
               Month
             </label>
 
             <select
               value={selectedMonth}
-              onChange={(e) =>
+              onChange={(e) => {
                 setSelectedMonth(
                   Number(e.target.value)
-                )
-              }
-              className="w-full border rounded-lg p-3"
+                );
+
+                if (!editingId) {
+                  setCompleted("");
+                  setRemainingTime("");
+                }
+              }}
+              className="w-full rounded-lg border p-3"
             >
               {MONTHS.map(
                 (month, index) => (
@@ -724,33 +887,60 @@ export default function SalesPerformancePage() {
           </div>
 
           <div>
-            <label className="block font-medium mb-2">
+            <label className="mb-2 block font-medium">
+              Week
+            </label>
+
+            <select
+              value={selectedWeek}
+              onChange={(e) =>
+                setSelectedWeek(
+                  Number(e.target.value)
+                )
+              }
+              className="w-full rounded-lg border p-3"
+            >
+              {WEEKS.map((week) => (
+                <option
+                  key={week}
+                  value={week}
+                >
+                  Week {week}
+                </option>
+              ))}
+            </select>
+          </div>
+
+          <div>
+            <label className="mb-2 block font-medium">
               Year
             </label>
 
             <input
               type="number"
               value={selectedYear}
-              onChange={(e) =>
+              onChange={(e) => {
                 setSelectedYear(
                   Number(e.target.value)
-                )
-              }
-              min="2020"
-              max="2100"
-              className="w-full border rounded-lg p-3"
-              required
+                );
+
+                if (!editingId) {
+                  setCompleted("");
+                  setRemainingTime("");
+                }
+              }}
+              min={2024}
+              max={2100}
+              className="w-full rounded-lg border p-3"
             />
           </div>
-
         </div>
 
-        {/* TARGET + COMPLETED */}
+        {/* TARGET / COMPLETED */}
 
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
-
+        <div className="grid grid-cols-1 gap-5 md:grid-cols-2">
           <div>
-            <label className="block font-medium mb-2">
+            <label className="mb-2 block font-medium">
               Monthly Target
             </label>
 
@@ -761,15 +951,16 @@ export default function SalesPerformancePage() {
                 setTarget(e.target.value)
               }
               min="1"
+              step="1"
+              className="w-full rounded-lg border p-3"
               placeholder="Enter monthly target"
-              className="w-full border rounded-lg p-3"
               required
             />
           </div>
 
           <div>
-            <label className="block font-medium mb-2">
-              Completed
+            <label className="mb-2 block font-medium">
+              Completed This Week
             </label>
 
             <input
@@ -779,44 +970,18 @@ export default function SalesPerformancePage() {
                 setCompleted(e.target.value)
               }
               min="0"
-              placeholder="Enter completed sales"
-              className="w-full border rounded-lg p-3"
+              step="1"
+              className="w-full rounded-lg border p-3"
+              placeholder="Completed this week"
               required
             />
           </div>
-
         </div>
 
-        {/* PENDING + ACHIEVEMENT */}
-
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
-
-          <div className="bg-orange-50 rounded-xl p-5">
-            <p className="text-sm text-gray-600">
-              Pending Target
-            </p>
-
-            <p className="text-2xl font-bold text-orange-600 mt-1">
-              {pendingTarget}
-            </p>
-          </div>
-
-          <div className="bg-blue-50 rounded-xl p-5">
-            <p className="text-sm text-gray-600">
-              Achievement
-            </p>
-
-            <p className="text-2xl font-bold text-blue-600 mt-1">
-              {achievement}%
-            </p>
-          </div>
-
-        </div>
-
-        {/* REMAINING TIME */}
+        {/* REMAINING */}
 
         <div>
-          <label className="block font-medium mb-2">
+          <label className="mb-2 block font-medium">
             Remaining Time
           </label>
 
@@ -828,15 +993,15 @@ export default function SalesPerformancePage() {
                 e.target.value
               )
             }
+            className="w-full rounded-lg border p-3"
             placeholder="Example: 10 days remaining"
-            className="w-full border rounded-lg p-3"
           />
         </div>
 
-        {/* EXCEL UPLOAD */}
+        {/* FILE */}
 
         <div>
-          <label className="block font-medium mb-2">
+          <label className="mb-2 block font-medium">
             Upload Excel File
           </label>
 
@@ -846,206 +1011,200 @@ export default function SalesPerformancePage() {
             accept=".xlsx,.xls,.csv"
             onChange={(e) =>
               setSelectedFile(
-                e.target.files?.[0] ||
-                  null
+                e.target.files?.[0] ?? null
               )
             }
-            className="w-full border rounded-lg p-3"
+            className="w-full rounded-lg border p-3"
           />
 
           {selectedFile && (
-            <p className="text-sm text-green-600 mt-2">
+            <p className="mt-2 text-sm text-green-600">
               Selected: {selectedFile.name}
             </p>
           )}
 
           {editingId &&
-            !selectedFile && (
-              <p className="text-sm text-gray-500 mt-2">
-                Leave this empty if you do not want to replace the existing file.
+            !selectedFile &&
+            history.find(
+              (item) =>
+                item.id === editingId
+            )?.file_name && (
+              <p className="mt-2 text-sm text-gray-500">
+                Current file:{" "}
+                {
+                  history.find(
+                    (item) =>
+                      item.id === editingId
+                  )?.file_name
+                }
               </p>
             )}
         </div>
 
-        {/* SAVE BUTTON */}
+        {/* BUTTON */}
 
         <button
           type="submit"
           disabled={saving}
-          className="w-full bg-violet-600 text-white rounded-lg py-3 font-semibold hover:bg-violet-700 disabled:opacity-50"
+          className="w-full rounded-lg bg-violet-600 py-3 font-semibold text-white hover:bg-violet-700 disabled:cursor-not-allowed disabled:opacity-50"
         >
           {saving
             ? "Saving..."
             : editingId
-            ? "Update Performance"
-            : "Upload Performance"}
+              ? "Update Weekly Report"
+              : "Upload Weekly Report"}
         </button>
-
       </form>
 
-      {/* PERFORMANCE HISTORY */}
+      {/* HISTORY */}
 
-      <div className="bg-white rounded-xl shadow-lg overflow-hidden">
-        <div className="p-8 border-b">
+      <div className="rounded-xl bg-white p-8 shadow-lg">
+        <div className="mb-6">
           <h2 className="text-2xl font-bold">
             Performance History
           </h2>
 
-          <p className="text-gray-500 mt-1">
-            Your month-wise sales performance history.
+          <p className="mt-1 text-gray-500">
+            View all your submitted weekly sales
+            reports.
           </p>
         </div>
 
-        <div className="overflow-x-auto">
-          <table className="w-full">
-            <thead className="bg-gray-100">
-              <tr>
-                <th className="p-4 text-left">
-                  Month
-                </th>
-
-                <th className="p-4 text-left">
-                  Target
-                </th>
-
-                <th className="p-4 text-left">
-                  Completed
-                </th>
-
-                <th className="p-4 text-left">
-                  Pending
-                </th>
-
-                <th className="p-4 text-left">
-                  Achievement
-                </th>
-
-                <th className="p-4 text-left">
-                  Remaining Time
-                </th>
-
-                <th className="p-4 text-left">
-                  File
-                </th>
-
-                <th className="p-4 text-center">
-                  Action
-                </th>
-              </tr>
-            </thead>
-
-            <tbody>
-              {history.length === 0 ? (
+        {history.length === 0 ? (
+          <div className="py-12 text-center text-gray-500">
+            No sales performance reports found.
+          </div>
+        ) : (
+          <div className="overflow-x-auto">
+            <table className="min-w-full border border-gray-200">
+              <thead className="bg-gray-100">
                 <tr>
-                  <td
-                    colSpan={8}
-                    className="text-center py-10 text-gray-500"
-                  >
-                    No sales performance history found.
-                  </td>
+                  <th className="border px-4 py-3 text-left">
+                    Month
+                  </th>
+
+                  <th className="border px-4 py-3 text-left">
+                    Week
+                  </th>
+
+                  <th className="border px-4 py-3 text-left">
+                    Year
+                  </th>
+
+                  <th className="border px-4 py-3 text-right">
+                    Monthly Target
+                  </th>
+
+                  <th className="border px-4 py-3 text-right">
+                    Completed
+                  </th>
+
+                  <th className="border px-4 py-3 text-left">
+                    Remaining Time
+                  </th>
+
+                  <th className="border px-4 py-3 text-left">
+                    File
+                  </th>
+
+                  <th className="border px-4 py-3 text-center">
+                    Actions
+                  </th>
                 </tr>
-              ) : (
-                history.map((record) => {
-                  const recordTarget =
-                    Number(record.target) || 0;
+              </thead>
 
-                  const recordCompleted =
-                    Number(record.completed) || 0;
+              <tbody>
+                {history.map((record) => (
+                  <tr
+                    key={record.id}
+                    className="hover:bg-gray-50"
+                  >
+                    <td className="border px-4 py-3">
+                      {MONTHS[
+                        Number(record.month) - 1
+                      ] ?? "-"}
+                    </td>
 
-                  const recordPending =
-                    Math.max(
-                      recordTarget - recordCompleted,
-                      0
-                    );
+                    <td className="border px-4 py-3">
+                      Week{" "}
+                      {record.week_number}
+                    </td>
 
-                  const recordAchievement =
-                    recordTarget > 0
-                      ? Math.min(
-                          Math.round(
-                            (recordCompleted /
-                              recordTarget) *
-                              100
-                          ),
-                          100
-                        )
-                      : 0;
+                    <td className="border px-4 py-3">
+                      {record.year}
+                    </td>
 
-                  return (
-                    <tr
-                      key={record.id}
-                      className="border-t hover:bg-gray-50"
-                    >
-                      <td className="p-4 font-semibold">
-                        {MONTHS[record.month - 1]}{" "}
-                        {record.year}
-                      </td>
+                    <td className="border px-4 py-3 text-right font-medium">
+                      {Number(
+                        record.target ?? 0
+                      ).toLocaleString()}
+                    </td>
 
-                      <td className="p-4">
-                        {recordTarget}
-                      </td>
+                    <td className="border px-4 py-3 text-right font-semibold text-green-600">
+                      {Number(
+                        record.completed ?? 0
+                      ).toLocaleString()}
+                    </td>
 
-                      <td className="p-4">
-                        <span className="font-semibold text-green-600">
-                          {recordCompleted}
+                    <td className="border px-4 py-3">
+                      {record.remaining_time ||
+                        "-"}
+                    </td>
+
+                    <td className="border px-4 py-3">
+                      {record.file_name ? (
+                        <button
+                          type="button"
+                          onClick={() =>
+                            viewFile(
+                              record.file_path
+                            )
+                          }
+                          className="text-blue-600 hover:underline"
+                        >
+                          {record.file_name}
+                        </button>
+                      ) : (
+                        <span className="text-gray-400">
+                          No File
                         </span>
-                      </td>
+                      )}
+                    </td>
 
-                      <td className="p-4">
-                        <span className="font-semibold text-orange-600">
-                          {recordPending}
-                        </span>
-                      </td>
+                    <td className="border px-4 py-3">
+                      <div className="flex items-center justify-center gap-2">
+                        <button
+                          type="button"
+                          onClick={() =>
+                            handleEdit(record)
+                          }
+                          className="rounded bg-violet-600 px-3 py-1 text-white hover:bg-violet-700"
+                        >
+                          Edit
+                        </button>
 
-                      <td className="p-4">
-                        <span className="font-semibold text-blue-600">
-                          {recordAchievement}%
-                        </span>
-                      </td>
-
-                      <td className="p-4">
-                        {record.remaining_time || "-"}
-                      </td>
-
-                      <td className="p-4">
-                        {record.file_path ? (
+                        {record.file_path && (
                           <button
                             type="button"
                             onClick={() =>
-                              viewFile(record.file_path)
+                              viewFile(
+                                record.file_path
+                              )
                             }
-                            className="px-3 py-2 rounded-lg bg-blue-600 text-white text-sm font-medium hover:bg-blue-700"
+                            className="rounded bg-green-600 px-3 py-1 text-white hover:bg-green-700"
                           >
-                            View File
+                            View
                           </button>
-                        ) : (
-                          <span className="text-gray-400">
-                            No File
-                          </span>
                         )}
-                      </td>
-
-                      <td className="p-4">
-                        <div className="flex justify-center">
-                          <button
-                            type="button"
-                            onClick={() =>
-                              handleEdit(record)
-                            }
-                            className="px-4 py-2 rounded-lg bg-violet-600 text-white text-sm font-medium hover:bg-violet-700"
-                          >
-                            Edit
-                          </button>
-                        </div>
-                      </td>
-                    </tr>
-                  );
-                })
-              )}
-            </tbody>
-          </table>
-        </div>
+                      </div>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
       </div>
-
     </div>
   );
 }
