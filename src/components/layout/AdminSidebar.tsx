@@ -48,6 +48,11 @@ const menu = [
     icon: Wallet,
   },
   {
+    name: "Daily Activity Report",
+    href: "/admin/dar",
+    icon: Wallet,
+  },
+  {
     name: "Sales Performance",
     href: "/admin/sales-performance",
     icon: TrendingUp,
@@ -78,7 +83,10 @@ export default function AdminSidebar() {
   };
 
   return (
-    <aside className="fixed left-0 top-0 z-50 flex h-screen w-72 flex-col bg-violet-700 text-white">
+    <aside
+      id="admin-sidebar"
+      className="fixed inset-y-0 left-0 z-50 w-72 -translate-x-full overflow-y-auto bg-violet-700 text-white transition-transform duration-200 md:translate-x-0"
+    >
       {/* Logo */}
       <div className="border-b border-violet-500 p-6">
         <h1 className="text-2xl font-bold">

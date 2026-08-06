@@ -229,7 +229,7 @@ const pending = data.filter(
 
           <div> 
 
-            <h1 className="text-4xl font-bold">
+            <h1 className="text-2xl font-bold sm:text-3xl lg:text-4xl">
               {employee.full_name}
             </h1>
 
@@ -247,7 +247,7 @@ const pending = data.filter(
                 {employee.employee_code}
               </span>
 
-              <span className="bg-green-100 text-green-700 px-4 py-2 rounded-full">
+              <span className="text-green-700 px-4 py-2 rounded-full">
                 {employee.status}
               </span>
 

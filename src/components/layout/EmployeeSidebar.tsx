@@ -1,7 +1,11 @@
 "use client";
 
 import Link from "next/link";
-import { usePathname, useRouter } from "next/navigation";
+import {
+  usePathname,
+  useRouter,
+} from "next/navigation";
+
 import {
   LayoutDashboard,
   House,
@@ -11,6 +15,7 @@ import {
   LogOut,
   TrendingUp,
   KeyRound,
+  X,
 } from "lucide-react";
 
 import { createClient } from "@/lib/supabase/client";
@@ -37,6 +42,11 @@ const menu = [
     icon: Wallet,
   },
   {
+    name: "Daily Activity Report",
+    href: "/employee/dar",
+    icon: TrendingUp,
+  },
+  {
     name: "Sales Performance",
     href: "/employee/sales-performance",
     icon: TrendingUp,
@@ -59,8 +69,30 @@ export default function EmployeeSidebar() {
 
   const supabase = createClient();
 
+  // =========================================================
+  // CLOSE SIDEBAR - MOBILE
+  // =========================================================
+
+  const closeSidebar = () => {
+    const sidebar =
+      document.getElementById(
+        "employee-sidebar"
+      );
+
+    if (!sidebar) return;
+
+    sidebar.classList.add(
+      "-translate-x-full"
+    );
+  };
+
+  // =========================================================
+  // LOGOUT
+  // =========================================================
+
   const handleLogout = async () => {
-    const { error } = await supabase.auth.signOut();
+    const { error } =
+      await supabase.auth.signOut();
 
     if (error) {
       alert(error.message);
@@ -72,47 +104,120 @@ export default function EmployeeSidebar() {
   };
 
   return (
-    <aside className="flex h-screen w-72 flex-col bg-violet-700 text-white">
+    <aside
+      id="employee-sidebar"
+      className="
+        fixed
+        inset-y-0
+        left-0
+        z-50
+        flex
+        h-screen
+        w-72
+        -translate-x-full
+        flex-col
+        bg-violet-700
+        text-white
+        shadow-xl
+        transition-transform
+        duration-200
+        md:translate-x-0
+      "
+    >
+      {/* =================================================== */}
       {/* LOGO */}
-      <div className="border-b border-violet-500 p-6">
-        <h1 className="text-2xl font-bold">
+      {/* =================================================== */}
+
+      <div className="flex h-24 shrink-0 items-center justify-between border-b border-violet-600 px-6">
+        <h1 className="text-2xl font-bold tracking-wide">
           AV INDIA HRMS
         </h1>
+
+        {/* MOBILE CLOSE */}
+
+        <button
+          type="button"
+          onClick={closeSidebar}
+          className="inline-flex items-center justify-center rounded-lg p-2 transition hover:bg-violet-800 md:hidden"
+          aria-label="Close sidebar"
+        >
+          <X size={22} />
+        </button>
       </div>
 
+      {/* =================================================== */}
       {/* MENU */}
-      <nav className="flex-1 space-y-2 overflow-y-auto p-4">
-        {menu.map((item) => {
-          const Icon = item.icon;
+      {/* =================================================== */}
 
-          const isActive =
-            pathname === item.href ||
-            pathname.startsWith(`${item.href}/`);
+      <nav className="min-h-0 flex-1 overflow-y-auto px-4 py-5">
+        <div className="space-y-2">
+          {menu.map((item) => {
+            const Icon = item.icon;
 
-          return (
-            <Link
-              key={item.name}
-              href={item.href}
-              className={`flex items-center gap-3 rounded-lg px-4 py-3 transition ${
-                isActive
-                  ? "bg-white font-semibold text-violet-700"
-                  : "hover:bg-violet-600"
-              }`}
-            >
-              <Icon size={20} />
+            const isActive =
+              pathname === item.href ||
+              pathname.startsWith(
+                `${item.href}/`
+              );
 
-              <span>{item.name}</span>
-            </Link>
-          );
-        })}
+            return (
+              <Link
+                key={item.href}
+                href={item.href}
+                onClick={closeSidebar}
+                className={`
+                  flex
+                  items-center
+                  gap-3
+                  rounded-xl
+                  px-4
+                  py-3
+                  text-[15px]
+                  transition
+                  ${
+                    isActive
+                      ? "bg-white font-semibold text-violet-700 shadow-sm"
+                      : "text-white hover:bg-violet-600"
+                  }
+                `}
+              >
+                <Icon
+                  size={20}
+                  className="shrink-0"
+                />
+
+                <span>
+                  {item.name}
+                </span>
+              </Link>
+            );
+          })}
+        </div>
       </nav>
 
+      {/* =================================================== */}
       {/* LOGOUT */}
-      <div className="border-t border-violet-500 p-4">
+      {/* =================================================== */}
+
+      <div className="shrink-0 border-t border-violet-600 p-4">
         <button
           type="button"
           onClick={handleLogout}
-          className="flex w-full items-center justify-center gap-3 rounded-lg bg-red-500 px-4 py-3 transition hover:bg-red-600"
+          className="
+            flex
+            w-full
+            items-center
+            justify-center
+            gap-3
+            rounded-xl
+            bg-red-600
+            px-4
+            py-3
+            font-semibold
+            text-white
+            transition
+            hover:bg-red-700
+          "
         >
           <LogOut size={20} />
 

@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import Image from "next/image";
-import { Search, UserCircle2 } from "lucide-react";
+import { Search, UserCircle2, Menu } from "lucide-react";
 import { createClient } from "@/lib/supabase/client";
 
 type Employee = {
@@ -44,8 +44,24 @@ useEffect(() => {
 }, [supabase]);
 
   return (
-    <header className="flex h-16 items-center justify-between rounded-xl bg-white px-6 shadow-sm">
-      {/* Search */}
+    <header className="flex h-16 items-center justify-between rounded-xl bg-white px-4 sm:px-6 shadow-sm">
+      {/* Mobile: hamburger toggles sidebar */}
+      <div className="flex items-center gap-3">
+        <button
+          type="button"
+          onClick={() => {
+            const el = document.getElementById("employee-sidebar");
+            if (!el) return;
+            el.classList.toggle("-translate-x-full");
+          }}
+          className="mr-2 inline-flex items-center justify-center rounded-md p-2 hover:bg-gray-100 md:hidden"
+          aria-label="Toggle sidebar"
+        >
+          <Menu size={20} />
+        </button>
+
+        {/* Search */}
+      </div>
       <div className="relative w-full max-w-md">
         <Search
           size={18}
@@ -74,13 +90,11 @@ useEffect(() => {
         )}
 
         <div>
-          <p className="font-semibold">
+          <p className="text-gray-900 font-semibold">
             {employee?.full_name || "Employee"}
           </p>
 
-          <p className="text-sm text-gray-500">
-            Employee Portal
-          </p>
+          <p className="text-sm text-gray-500">Employee Portal</p>
         </div>
       </div>
     </header>

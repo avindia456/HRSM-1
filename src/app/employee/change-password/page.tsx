@@ -385,7 +385,7 @@ export default function EmployeeChangePasswordPage() {
           {/* SUCCESS MESSAGE */}
 
           {successMessage && (
-            <div className="rounded-lg border border-green-200 bg-green-50 p-4 text-sm font-medium text-green-700">
+            <div className="rounded-lg border border-green-200 p-4 text-sm font-medium text-green-700">
               {successMessage}
             </div>
           )}

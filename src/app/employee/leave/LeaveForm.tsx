@@ -788,7 +788,7 @@ status: "Pending",
                             className={`inline-flex px-3 py-1 rounded-full text-sm font-medium ${
                               status.toLowerCase() ===
                               "approved"
-                                ? "bg-green-100 text-green-700"
+                                ? "text-green-700"
                                 : status.toLowerCase() ===
                                   "rejected"
                                 ? "bg-red-100 text-red-700"

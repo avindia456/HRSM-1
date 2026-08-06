@@ -23,7 +23,7 @@ export default function Payslip({ payroll }: PayslipProps) {
 
       {/* Employee Details */}
 
-      <div className="grid grid-cols-2 gap-10 mt-8">
+      <div className="grid grid-cols-2 gap-6 md:gap-10 mt-8">
 
         <div>
 

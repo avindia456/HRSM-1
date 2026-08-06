@@ -730,8 +730,8 @@ export default function AdminSalesPerformancePage() {
             </p>
           </div>
 
-          <div className="overflow-x-auto">
-            <table className="min-w-[1100px] w-full">
+          <div className="w-full overflow-x-auto overscroll-x-contain">
+            <table className="w-full min-w-[900px]">
               <thead className="bg-gray-100">
                 <tr>
                   <th className="p-4 text-left">

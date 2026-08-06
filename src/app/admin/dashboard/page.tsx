@@ -36,7 +36,7 @@ const { count: wfhToday } = await supabase
     .limit(5);
 return (
   <>
-    <h1 className="mb-8 text-4xl font-bold text-violet-700">
+    <h1 className="mb-5 text-2xl font-bold text-violet-700 sm:mb-8 sm:text-3xl lg:text-4xl">
       Admin Dashboard
     </h1>
 
@@ -75,7 +75,8 @@ return (
         Recent Employees
       </h2>
 
-      <table className="w-full">
+      <div className="overflow-x-auto">
+        <table className="w-full min-w-[600px]">
         <thead>
           <tr className="border-b">
             <th className="py-3 text-left">Name</th>
@@ -94,6 +95,7 @@ return (
           ))}
         </tbody>
       </table>
+    </div>
     </div>
   </>
  );

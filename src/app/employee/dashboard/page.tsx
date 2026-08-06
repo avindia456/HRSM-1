@@ -3,6 +3,10 @@
 import { useEffect, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
 
+// =========================================================
+// TYPES
+// =========================================================
+
 interface Attendance {
   id: string;
   attendance_date: string;
@@ -10,6 +14,12 @@ interface Attendance {
   check_out: string | null;
   late_mark: boolean;
   status: string;
+
+  check_in_latitude: number | null;
+  check_in_longitude: number | null;
+
+  check_out_latitude: number | null;
+  check_out_longitude: number | null;
 }
 
 interface WFHRequest {
@@ -20,6 +30,22 @@ interface WFHRequest {
   status: string;
   created_at?: string;
 }
+
+interface LocationData {
+  latitude: number;
+  longitude: number;
+}
+
+interface LoggedInPerson {
+  id: string;
+  email: string | null;
+  full_name?: string | null;
+  auth_id?: string | null;
+}
+
+// =========================================================
+// COMPONENT
+// =========================================================
 
 export default function EmployeeDashboard() {
   const supabase = createClient();
@@ -33,15 +59,23 @@ export default function EmployeeDashboard() {
   const [wfhRequests, setWfhRequests] =
     useState<WFHRequest[]>([]);
 
+  const [loggedInPerson, setLoggedInPerson] =
+    useState<LoggedInPerson | null>(null);
+
   const [loading, setLoading] =
     useState(true);
+
+  const [
+    attendanceActionLoading,
+    setAttendanceActionLoading,
+  ] = useState(false);
 
   // =========================================================
   // INITIAL LOAD
   // =========================================================
 
   useEffect(() => {
-    loadAttendance();
+    loadDashboard();
   }, []);
 
   // =========================================================
@@ -49,12 +83,15 @@ export default function EmployeeDashboard() {
   // =========================================================
 
   function getCurrentTime() {
-    return new Date().toLocaleTimeString("en-GB", {
-      hour: "2-digit",
-      minute: "2-digit",
-      second: "2-digit",
-      hour12: false,
-    });
+    return new Date().toLocaleTimeString(
+      "en-GB",
+      {
+        hour: "2-digit",
+        minute: "2-digit",
+        second: "2-digit",
+        hour12: false,
+      }
+    );
   }
 
   // =========================================================
@@ -78,17 +115,141 @@ export default function EmployeeDashboard() {
   }
 
   // =========================================================
-  // GET LOGGED IN EMPLOYEE
+  // CURRENT LOCATION
   // =========================================================
 
-  async function getEmployeeId() {
+  function getCurrentLocation(): Promise<LocationData> {
+    return new Promise(
+      (resolve, reject) => {
+        if (!navigator.geolocation) {
+          reject(
+            new Error(
+              "Location is not supported by this browser."
+            )
+          );
+
+          return;
+        }
+
+        navigator.geolocation.getCurrentPosition(
+          (position) => {
+            console.log(
+              "GPS accuracy:",
+              position.coords.accuracy
+            );
+
+            resolve({
+              latitude:
+                position.coords.latitude,
+
+              longitude:
+                position.coords.longitude,
+            });
+          },
+
+          (error) => {
+            console.error(
+              "Geolocation Error:",
+              error
+            );
+
+            if (
+              error.code ===
+              error.PERMISSION_DENIED
+            ) {
+              reject(
+                new Error(
+                  "Location permission is required. Please allow location access and try again."
+                )
+              );
+
+              return;
+            }
+
+            if (
+              error.code ===
+              error.POSITION_UNAVAILABLE
+            ) {
+              reject(
+                new Error(
+                  "Your current location could not be detected. Please enable GPS/location services."
+                )
+              );
+
+              return;
+            }
+
+            if (
+              error.code ===
+              error.TIMEOUT
+            ) {
+              reject(
+                new Error(
+                  "Location request timed out. Please try again."
+                )
+              );
+
+              return;
+            }
+
+            reject(
+              new Error(
+                "Unable to get your current location."
+              )
+            );
+          },
+
+          {
+            enableHighAccuracy: true,
+            timeout: 20000,
+            maximumAge: 0,
+          }
+        );
+      }
+    );
+  }
+
+  // =========================================================
+  // OPEN GOOGLE MAPS
+  // =========================================================
+
+  function openLocation(
+    latitude: number | null,
+    longitude: number | null
+  ) {
+    if (
+      latitude == null ||
+      longitude == null
+    ) {
+      alert(
+        "Location not available."
+      );
+
+      return;
+    }
+
+    const url =
+      `https://www.google.com/maps?q=${latitude},${longitude}`;
+
+    window.open(
+      url,
+      "_blank",
+      "noopener,noreferrer"
+    );
+  }
+
+  // =========================================================
+  // GET LOGGED IN USER'S EMPLOYEE RECORD
+  // WORKS FOR EMPLOYEE + ADMIN
+  // =========================================================
+
+  async function getLoggedInEmployee() {
     try {
       const {
         data: { user },
         error: authError,
-      } = await supabase.auth.getUser();
-
-      console.log("Logged in user:", user);
+      } =
+        await supabase.auth.getUser();
 
       if (authError) {
         console.error(
@@ -107,73 +268,80 @@ export default function EmployeeDashboard() {
         return null;
       }
 
+      console.log(
+        "Logged In Auth User:",
+        user
+      );
+
       // =====================================================
-      // FIRST TRY: FIND EMPLOYEE USING auth_id
+      // FIRST: SEARCH USING AUTH ID
       // =====================================================
 
       const {
-        data: employeeByAuth,
-        error: employeeAuthError,
+        data: byAuth,
+        error: authLookupError,
       } = await supabase
         .from("employees")
-        .select("id, email, auth_id")
-        .eq("auth_id", user.id)
+        .select(
+          "id, email, full_name, auth_id"
+        )
+        .eq(
+          "auth_id",
+          user.id
+        )
         .maybeSingle();
 
-      console.log(
-        "Employee By Auth:",
-        employeeByAuth
-      );
-
-      if (employeeByAuth) {
-        return employeeByAuth.id;
-      }
-
-      if (employeeAuthError) {
+      if (authLookupError) {
         console.error(
-          "Employee Auth Lookup Error:",
-          employeeAuthError
+          "Auth ID Lookup Error:",
+          authLookupError
         );
       }
 
+      if (byAuth) {
+        setLoggedInPerson(byAuth);
+
+        return byAuth;
+      }
+
       // =====================================================
-      // FALLBACK: FIND EMPLOYEE USING EMAIL
+      // FALLBACK: SEARCH USING EMAIL
       // =====================================================
 
       if (!user.email) {
         console.error(
-          "Logged in user does not have email."
+          "Logged in user has no email."
         );
 
         return null;
       }
 
       const {
-        data: employeeByEmail,
-        error: employeeEmailError,
+        data: byEmail,
+        error: emailLookupError,
       } = await supabase
         .from("employees")
-        .select("id, email, auth_id")
-        .eq("email", user.email)
+        .select(
+          "id, email, full_name, auth_id"
+        )
+        .ilike(
+          "email",
+          user.email
+        )
         .maybeSingle();
 
-      console.log(
-        "Employee By Email:",
-        employeeByEmail
-      );
-
-      if (employeeEmailError) {
+      if (emailLookupError) {
         console.error(
-          "Employee Email Lookup Error:",
-          employeeEmailError
+          "Email Lookup Error:",
+          emailLookupError
         );
 
         return null;
       }
 
-      if (!employeeByEmail) {
+      if (!byEmail) {
         console.error(
-          "Employee not found for email:",
+          "No employee record found for:",
           user.email
         );
 
@@ -181,12 +349,12 @@ export default function EmployeeDashboard() {
       }
 
       // =====================================================
-      // AUTOMATICALLY LINK auth_id
+      // AUTO LINK AUTH ID
       // =====================================================
 
-      if (!employeeByEmail.auth_id) {
+      if (!byEmail.auth_id) {
         const {
-          error: updateAuthError,
+          error: linkError,
         } = await supabase
           .from("employees")
           .update({
@@ -194,25 +362,34 @@ export default function EmployeeDashboard() {
           })
           .eq(
             "id",
-            employeeByEmail.id
+            byEmail.id
           );
 
-        if (updateAuthError) {
+        if (linkError) {
           console.error(
             "Unable to link auth_id:",
-            updateAuthError
+            linkError
           );
         } else {
           console.log(
-            "Employee auth_id linked successfully."
+            "Auth ID linked successfully."
           );
         }
       }
 
-      return employeeByEmail.id;
+      const person = {
+        ...byEmail,
+        auth_id:
+          byEmail.auth_id ||
+          user.id,
+      };
+
+      setLoggedInPerson(person);
+
+      return person;
     } catch (error) {
       console.error(
-        "getEmployeeId Error:",
+        "getLoggedInEmployee Error:",
         error
       );
 
@@ -221,29 +398,26 @@ export default function EmployeeDashboard() {
   }
 
   // =========================================================
-  // LOAD ATTENDANCE + HISTORY + WFH
+  // LOAD DASHBOARD
   // =========================================================
 
-  async function loadAttendance() {
+  async function loadDashboard() {
     setLoading(true);
 
     try {
-      const employeeId =
-        await getEmployeeId();
+      const person =
+        await getLoggedInEmployee();
 
-      console.log(
-        "Employee ID:",
-        employeeId
-      );
-
-      if (!employeeId) {
+      if (!person) {
         setAttendance(null);
         setHistory([]);
         setWfhRequests([]);
-        setLoading(false);
 
         return;
       }
+
+      const employeeId =
+        person.id;
 
       // =====================================================
       // TODAY ATTENDANCE
@@ -277,7 +451,7 @@ export default function EmployeeDashboard() {
       );
 
       // =====================================================
-      // ATTENDANCE HISTORY
+      // HISTORY
       // =====================================================
 
       const {
@@ -299,7 +473,7 @@ export default function EmployeeDashboard() {
 
       if (historyError) {
         console.error(
-          "Attendance History Error:",
+          "History Error:",
           historyError
         );
       }
@@ -309,7 +483,7 @@ export default function EmployeeDashboard() {
       );
 
       // =====================================================
-      // WFH HISTORY
+      // WFH
       // =====================================================
 
       const {
@@ -328,11 +502,6 @@ export default function EmployeeDashboard() {
             ascending: false,
           }
         );
-
-      console.log(
-        "WFH Data:",
-        wfhData
-      );
 
       if (wfhError) {
         console.error(
@@ -359,13 +528,19 @@ export default function EmployeeDashboard() {
   // =========================================================
 
   async function checkIn() {
-    try {
-      const employeeId =
-        await getEmployeeId();
+    if (attendanceActionLoading) {
+      return;
+    }
 
-      if (!employeeId) {
+    setAttendanceActionLoading(true);
+
+    try {
+      const person =
+        await getLoggedInEmployee();
+
+      if (!person) {
         alert(
-          "Employee record not found. Please contact admin."
+          "Your employee record was not found. Admin and employee accounts must also exist in the employees table."
         );
 
         return;
@@ -379,7 +554,24 @@ export default function EmployeeDashboard() {
         return;
       }
 
-      const now = new Date();
+      // =====================================================
+      // GET GPS LOCATION
+      // =====================================================
+
+      const location =
+        await getCurrentLocation();
+
+      console.log(
+        "Check-In Location:",
+        location
+      );
+
+      // =====================================================
+      // LATE MARK
+      // =====================================================
+
+      const now =
+        new Date();
 
       const officeTime =
         new Date();
@@ -394,19 +586,29 @@ export default function EmployeeDashboard() {
       const lateMark =
         now > officeTime;
 
+      // =====================================================
+      // SAVE
+      // =====================================================
+
       const {
         error,
       } = await supabase
         .from("attendance")
         .insert({
           employee_id:
-            employeeId,
+            person.id,
 
           attendance_date:
             getToday(),
 
           check_in:
             getCurrentTime(),
+
+          check_in_latitude:
+            location.latitude,
+
+          check_in_longitude:
+            location.longitude,
 
           late_mark:
             lateMark,
@@ -417,7 +619,7 @@ export default function EmployeeDashboard() {
 
       if (error) {
         console.error(
-          "Check In Error:",
+          "Check-In Database Error:",
           error
         );
 
@@ -429,13 +631,13 @@ export default function EmployeeDashboard() {
       }
 
       alert(
-        "Check-in successful!"
+        "Check-in successful! Location recorded."
       );
 
-      await loadAttendance();
+      await loadDashboard();
     } catch (error: any) {
       console.error(
-        "Check In Error:",
+        "Check-In Error:",
         error
       );
 
@@ -443,6 +645,8 @@ export default function EmployeeDashboard() {
         error?.message ||
           "Unable to check in."
       );
+    } finally {
+      setAttendanceActionLoading(false);
     }
   }
 
@@ -451,6 +655,12 @@ export default function EmployeeDashboard() {
   // =========================================================
 
   async function checkOut() {
+    if (attendanceActionLoading) {
+      return;
+    }
+
+    setAttendanceActionLoading(true);
+
     try {
       if (!attendance) {
         alert(
@@ -468,6 +678,22 @@ export default function EmployeeDashboard() {
         return;
       }
 
+      // =====================================================
+      // GET GPS LOCATION AGAIN
+      // =====================================================
+
+      const location =
+        await getCurrentLocation();
+
+      console.log(
+        "Check-Out Location:",
+        location
+      );
+
+      // =====================================================
+      // UPDATE
+      // =====================================================
+
       const {
         error,
       } = await supabase
@@ -475,6 +701,12 @@ export default function EmployeeDashboard() {
         .update({
           check_out:
             getCurrentTime(),
+
+          check_out_latitude:
+            location.latitude,
+
+          check_out_longitude:
+            location.longitude,
 
           status:
             "Present",
@@ -486,7 +718,7 @@ export default function EmployeeDashboard() {
 
       if (error) {
         console.error(
-          "Check Out Error:",
+          "Check-Out Database Error:",
           error
         );
 
@@ -498,13 +730,13 @@ export default function EmployeeDashboard() {
       }
 
       alert(
-        "Check-out successful!"
+        "Check-out successful! Location recorded."
       );
 
-      await loadAttendance();
+      await loadDashboard();
     } catch (error: any) {
       console.error(
-        "Check Out Error:",
+        "Check-Out Error:",
         error
       );
 
@@ -512,6 +744,8 @@ export default function EmployeeDashboard() {
         error?.message ||
           "Unable to check out."
       );
+    } finally {
+      setAttendanceActionLoading(false);
     }
   }
 
@@ -521,7 +755,7 @@ export default function EmployeeDashboard() {
 
   if (loading) {
     return (
-      <div className="p-10 text-xl">
+      <div className="p-4 sm:p-6 text-xl">
         Loading...
       </div>
     );
@@ -532,27 +766,32 @@ export default function EmployeeDashboard() {
   // =========================================================
 
   return (
-    <div className="max-w-6xl mx-auto p-10">
+    <div className="mx-auto w-full max-w-6xl px-3 py-4 sm:px-5 sm:py-6 lg:p-10">
 
-      {/* ================================================= */}
       {/* HEADING */}
-      {/* ================================================= */}
 
-      <h1 className="text-4xl font-bold mb-8">
-        Employee Dashboard
+      <h1 className="mb-5 text-2xl font-bold sm:mb-8 sm:text-3xl lg:text-4xl">
+        Attendance Dashboard
       </h1>
+
+      {loggedInPerson && (
+        <p className="text-gray-500 mb-8">
+          {loggedInPerson.full_name ||
+            loggedInPerson.email}
+        </p>
+      )}
 
       {/* ================================================= */}
       {/* TODAY ATTENDANCE */}
       {/* ================================================= */}
 
-      <div className="bg-white rounded-xl shadow-lg p-8">
+      <div className="rounded-xl bg-white p-4 shadow-lg sm:p-6 lg:p-8">
 
         <h2 className="text-2xl font-semibold mb-6">
           Today&apos;s Attendance
         </h2>
 
-        <div className="grid grid-cols-2 md:grid-cols-4 gap-6">
+        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4 lg:gap-6">
 
           {/* CHECK IN */}
 
@@ -565,6 +804,22 @@ export default function EmployeeDashboard() {
               {attendance?.check_in ||
                 "--"}
             </p>
+
+            {attendance?.check_in_latitude != null &&
+              attendance?.check_in_longitude != null && (
+                <button
+                  type="button"
+                  onClick={() =>
+                    openLocation(
+                      attendance.check_in_latitude,
+                      attendance.check_in_longitude
+                    )
+                  }
+                  className="text-blue-600 hover:underline text-sm mt-2"
+                >
+                  📍 View Location
+                </button>
+              )}
           </div>
 
           {/* CHECK OUT */}
@@ -578,6 +833,22 @@ export default function EmployeeDashboard() {
               {attendance?.check_out ||
                 "--"}
             </p>
+
+            {attendance?.check_out_latitude != null &&
+              attendance?.check_out_longitude != null && (
+                <button
+                  type="button"
+                  onClick={() =>
+                    openLocation(
+                      attendance.check_out_latitude,
+                      attendance.check_out_longitude
+                    )
+                  }
+                  className="text-blue-600 hover:underline text-sm mt-2"
+                >
+                  📍 View Location
+                </button>
+              )}
           </div>
 
           {/* LATE MARK */}
@@ -628,18 +899,23 @@ export default function EmployeeDashboard() {
         </div>
 
         {/* ================================================= */}
-        {/* BUTTONS */}
+        {/* CHECK IN / CHECK OUT */}
         {/* ================================================= */}
 
-        <div className="mt-8 flex gap-4 flex-wrap">
+        <div className="mt-6 flex flex-col gap-3 sm:mt-8 sm:flex-row sm:flex-wrap">
 
           {!attendance && (
             <button
               type="button"
               onClick={checkIn}
-              className="bg-green-600 hover:bg-green-700 text-white px-6 py-3 rounded-lg"
+              disabled={
+                attendanceActionLoading
+              }
+              className="bg-green-600 hover:bg-green-700 disabled:bg-green-300 disabled:cursor-not-allowed text-white px-6 py-3 rounded-lg w-full sm:w-auto"
             >
-              Check In
+              {attendanceActionLoading
+                ? "Getting Location..."
+                : "📍 Check In"}
             </button>
           )}
 
@@ -648,9 +924,14 @@ export default function EmployeeDashboard() {
               <button
                 type="button"
                 onClick={checkOut}
-                className="bg-red-600 hover:bg-red-700 text-white px-6 py-3 rounded-lg"
+                disabled={
+                  attendanceActionLoading
+                }
+                className="bg-red-600 hover:bg-red-700 disabled:bg-red-300 disabled:cursor-not-allowed text-white px-6 py-3 rounded-lg w-full sm:w-auto"
               >
-                Check Out
+                {attendanceActionLoading
+                  ? "Getting Location..."
+                  : "📍 Check Out"}
               </button>
             )}
 
@@ -662,24 +943,27 @@ export default function EmployeeDashboard() {
 
         </div>
 
+        <p className="mt-4 text-sm text-gray-500">
+          📍 Location permission is required for Check In and Check Out.
+        </p>
+
       </div>
 
       {/* ================================================= */}
       {/* ATTENDANCE HISTORY */}
       {/* ================================================= */}
 
-      <div className="bg-white rounded-xl shadow-lg p-8 mt-8">
+      <div className="mt-6 rounded-xl bg-white p-4 shadow-lg sm:mt-8 sm:p-6 lg:p-8">
 
         <h2 className="text-2xl font-semibold mb-6">
           Attendance History
         </h2>
 
-        <div className="overflow-x-auto">
+        <div className="w-full overflow-x-auto overscroll-x-contain">
 
-          <table className="w-full border-collapse">
+          <table className="w-full min-w-[750px] border-collapse">
 
             <thead>
-
               <tr className="bg-gray-100">
 
                 <th className="p-3 text-left">
@@ -702,8 +986,11 @@ export default function EmployeeDashboard() {
                   Status
                 </th>
 
-              </tr>
+                <th className="p-3 text-left">
+                  Location
+                </th>
 
+              </tr>
             </thead>
 
             <tbody>
@@ -768,19 +1055,65 @@ export default function EmployeeDashboard() {
 
                       </td>
 
+                      <td className="p-3">
+
+                        <div className="flex flex-col gap-2">
+
+                          {item.check_in_latitude != null &&
+                          item.check_in_longitude != null ? (
+                            <button
+                              type="button"
+                              onClick={() =>
+                                openLocation(
+                                  item.check_in_latitude,
+                                  item.check_in_longitude
+                                )
+                              }
+                              className="text-blue-600 hover:underline text-left text-sm"
+                            >
+                              📍 Check In Location
+                            </button>
+                          ) : (
+                            <span className="text-gray-400 text-sm">
+                              Check In: --
+                            </span>
+                          )}
+
+                          {item.check_out_latitude != null &&
+                          item.check_out_longitude != null ? (
+                            <button
+                              type="button"
+                              onClick={() =>
+                                openLocation(
+                                  item.check_out_latitude,
+                                  item.check_out_longitude
+                                )
+                              }
+                              className="text-blue-600 hover:underline text-left text-sm"
+                            >
+                              📍 Check Out Location
+                            </button>
+                          ) : (
+                            <span className="text-gray-400 text-sm">
+                              Check Out: --
+                            </span>
+                          )}
+
+                        </div>
+
+                      </td>
+
                     </tr>
                   )
                 )
               ) : (
                 <tr>
-
                   <td
-                    colSpan={5}
+                    colSpan={6}
                     className="text-center py-6 text-gray-500"
                   >
                     No attendance history found.
                   </td>
-
                 </tr>
               )}
 
@@ -793,7 +1126,7 @@ export default function EmployeeDashboard() {
       </div>
 
       {/* ================================================= */}
-      {/* WFH REQUESTS */}
+      {/* WFH */}
       {/* ================================================= */}
 
       <div className="bg-white rounded-xl shadow-lg p-8 mt-8">
@@ -807,7 +1140,6 @@ export default function EmployeeDashboard() {
           <table className="w-full">
 
             <thead>
-
               <tr className="bg-gray-100">
 
                 <th className="p-3 text-left">
@@ -823,7 +1155,6 @@ export default function EmployeeDashboard() {
                 </th>
 
               </tr>
-
             </thead>
 
             <tbody>
@@ -855,7 +1186,7 @@ export default function EmployeeDashboard() {
                           className={`px-3 py-1 rounded-full text-sm ${
                             item.status ===
                             "Approved"
-                              ? "bg-green-100 text-green-700"
+                              ? "text-green-700"
                               : item.status ===
                                 "Rejected"
                               ? "bg-red-100 text-red-700"
@@ -873,14 +1204,12 @@ export default function EmployeeDashboard() {
                 )
               ) : (
                 <tr>
-
                   <td
                     colSpan={3}
                     className="p-6 text-center text-gray-500"
                   >
                     No WFH Requests
                   </td>
-
                 </tr>
               )}
 
