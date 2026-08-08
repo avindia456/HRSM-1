@@ -43,6 +43,11 @@ const menu = [
     icon: CalendarDays,
   },
   {
+    name: "Half Day",
+    href: "/admin/half-day",
+    icon: CalendarDays,
+  },
+  {
     name: "Payroll",
     href: "/admin/payroll",
     icon: Wallet,

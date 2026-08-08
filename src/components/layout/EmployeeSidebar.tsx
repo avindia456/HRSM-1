@@ -36,6 +36,11 @@ const menu = [
     href: "/employee/leave",
     icon: CalendarDays,
   },
+    {
+    name: "Half Day",
+    href: "/employee/half-day",
+    icon: CalendarDays,
+  },
   {
     name: "Payroll",
     href: "/employee/payroll",
